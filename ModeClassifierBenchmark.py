@@ -1,4 +1,4 @@
-from InheritanceModeAnalysis import metric_thresholds_determination
+from ModeClassifierMain import metric_thresholds_determination
 from pprint import pprint
 import pandas as pd
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report

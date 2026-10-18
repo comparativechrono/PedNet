@@ -1,1 +1,10 @@
 .DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# The pipeline reads pedigree images and genotype data from data/, and the benchmarks write their results there.
+# Keep it out of the repository, since it may hold patients' data
+data/

@@ -25,6 +25,12 @@ AUC_THRESHOLD = 0.7
 #---------------------------------------
 # Classification Metric ROC Analysis
 #---------------------------------------
+def youden_threshold(fpr, tpr, thresholds):
+    '''
+    The threshold on the ROC curve with the largest Youden's J (true positive rate - false positive rate)
+    '''
+    return thresholds[int(np.argmax(np.asarray(tpr) - np.asarray(fpr)))]
+
 def metric_thresholds_determination(
                 pedigree_count= PEDIGREE_COUNT,
 
@@ -157,13 +163,7 @@ def metric_thresholds_determination(
         auc_score = auc(fpr, tpr)
 
         #Best Threshold Determination from ROC
-        Youden_J_values = tpr - fpr # works because tpr and fpr are numpy arrays
-        best_index = 0
-        best_YJ = 0
-        for i in range(len(Youden_J_values)):
-            if Youden_J_values[i] > best_YJ:
-                best_index = i
-        best_threshold = thresh[best_index]
+        best_threshold = youden_threshold(fpr, tpr, thresh)
         
 
         threshold_results[metric] = {

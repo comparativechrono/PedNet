@@ -1,0 +1,20 @@
+# Pedigree generation, graph analysis, mode of inheritance classification and segregation scoring
+pandas>=1.3
+numpy>=1.21
+networkx>=3.0
+matplotlib>=3.6
+scikit-learn>=1.0
+scipy>=1.7
+
+# The statistics scripts (ModeClassifierStats.py and SegScoreStats.py)
+seaborn>=0.12
+scikit-posthocs>=0.7
+statsmodels>=0.13
+
+# Reading pedigree images (CVPedigreeAnalysis.py and PedNetPipeline.py), which also needs the Tesseract OCR engine
+opencv-python>=4.5,<5
+pytesseract>=0.3.10
+Pillow>=9.0
+
+# Optional: drawing pedigrees with Graphviz's dot layout in plot_pedigree_tree (it draws without it)
+# pygraphviz>=1.10

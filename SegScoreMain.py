@@ -5,7 +5,6 @@ import numpy as np
 from scipy.optimize import minimize
 from PedigreeDAGAnalysis import generations, parents, aff, unaff, founder_influence, longest_path_length
 from PedigreeDataGeneration import PedGraph_VarTable_generator
-from IPython.display import display
 
 ############### GLOBAL DEFAULT PEDIGREE PARAMETERS ##################
 PEDIGREE_COUNT = 1000
@@ -133,7 +132,6 @@ def carrier_betweenness(G, gt):
     unaff_nodes = unaff(G)
     sequenced_samples = gt.keys()
     sequenced_unaff_nodes = list(set(unaff_nodes) & set(sequenced_samples))
-    sequenced_aff_nodes = list(set(unaff_nodes) & set(sequenced_samples))
     carrier_nodes = [n for n in sequenced_unaff_nodes if gt[n] == 1]
     carrier_aff_subgraph = G.subgraph(aff_nodes+carrier_nodes)
     subgraph_bet = nx.betweenness_centrality(carrier_aff_subgraph, normalized= False)
@@ -201,7 +199,8 @@ def alt_depth_ratio(G, gt):
                     lengths.append(nx.shortest_path_length(G, f, a))
         if lengths:
             alt_depth = max(lengths)
-    return alt_depth / depth
+    #a pedigree of one generation has no depth
+    return alt_depth / depth if depth else 0
 
 
 # ---------------------------------------------------------------------
@@ -325,6 +324,17 @@ def segregation_network_score(  PedGraph,
 # ---------------------------------------------------------------------
 # HELPER FUNCTIONS
 # ---------------------------------------------------------------------
+def linked_variant_rank(linked_score, unlinked_scores):
+    '''
+    The linked variant's rank among all the variants' scores, with ties shared out fairly: 1 plus the number of unlinked variants
+    scoring higher, plus half the number scoring the same, which is its expected rank if ties were broken at random.
+    It is 1 only when the linked variant scores higher than all the others. (Sorting the scores instead puts the linked variant
+    ahead of every variant it ties with, since it comes first in the variant table.)
+    '''
+    higher = sum(1 for score in unlinked_scores if score > linked_score)
+    tied = sum(1 for score in unlinked_scores if score == linked_score)
+    return 1 + higher + tied/2
+
 def max_score_highlighter(s):
     is_max = s == s.max()
     return [
@@ -443,11 +453,8 @@ def rank_weight_optimization_objective(weights_lst, Multi_Ped_Dict, linked_varia
                                                             categorical_scores= CategoricalScores)
                 unlinked_scores.append(unlinked_score)
 
-        all_scores = unlinked_scores + [linked_score]
         max_unlinked_score = max(unlinked_scores)
-
-        all_scores.sort(reverse=True)
-        linked_score_rank = all_scores.index(linked_score) + 1
+        linked_score_rank = linked_variant_rank(linked_score, unlinked_scores)
 
         margin = linked_score - max_unlinked_score
 
@@ -536,6 +543,7 @@ def trial_based_segregation_scoring_weight_optimization(
 
                                                     #PedGraph and VarTable Parameters
                                                     alt_freq_range= ALT_FREQ_RANGE,
+                                                    inherited_background= False,
                                                     ):
     '''
     Generates a pedigree set of a specified size, each with an associated variant table and ground truth linked variant,
@@ -570,6 +578,9 @@ def trial_based_segregation_scoring_weight_optimization(
     alt_freq_range((int,int)): duple of integer values indicating the range of alternate allele frequencies (as percentage) to be used in pedigree generation (inclusive),
         ranomly chosen per pedigree from the given range
 
+    inherited_background (bool): whether the background variants are passed down each pedigree by Mendel's laws, as real variants are,
+        rather than drawn independently for each person (the default, as before); see PedigreeDataGeneration.simulate_variant_table
+
 
     Segregation Scoring Parameters:
     Scoring_Method (string): the chosen scoring scheme to be used, dictating the set of categorical scores used ['standard', 'extended']
@@ -603,7 +614,8 @@ def trial_based_segregation_scoring_weight_optimization(
                                             variant_background_range= variant_background_range,
                                             
                                             #PedGraph and VarTable Parameters
-                                            alt_freq_range= alt_freq_range,)
+                                            alt_freq_range= alt_freq_range,
+                                            inherited_background= inherited_background)
     
     #Pre-calculate Categorical Scores to reduce computation time
     for FamID in Multi_Ped_Dict.keys():
@@ -727,9 +739,8 @@ def trial_based_segregation_scoring_weight_optimization(
             margin = linked_score - max(unlinked_scores)
             test_Multi_Ped_Dict[FamilyID][Scoring_Method][f'{opt}Margin'] = margin
 
-            #storing linked rank
-            ranks = [Var[0] for Var in sorted_score_list]
-            linked_rank = ranks.index('chr1:100000_A>T') + 1
+            #storing linked rank (ties shared out fairly)
+            linked_rank = linked_variant_rank(linked_score, unlinked_scores)
             test_Multi_Ped_Dict[FamilyID][Scoring_Method][f'{opt}LinkedRank'] = linked_rank
         
 
