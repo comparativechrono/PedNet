@@ -220,8 +220,66 @@ def test_ranking_across_families():
                                                       [variant('shared', calls), variant('private', private)])}
     alone = rank_variants(one, [variant('shared', calls)])[0]
     assert set(combined['shared'].families) == {'one', 'two'}
-    assert combined['shared'].log10_bf == pytest.approx(2 * alone.log10_bf)
+    # with the mode shared, the families' likelihood ratios multiply mode by mode
+    assert combined['shared'].log10_bf == pytest.approx(2 * alone.log10_bf, abs=1e-3)
+    known = rank_variants_across({'one': one, 'two': two}, [variant('shared', calls)], modes=('AD',))[0]
+    assert known.log10_bf == pytest.approx(2 * rank_variants(one, [variant('shared', calls)], modes=('AD',))[0].log10_bf)
     # the private variant counts in the family where an affected person carries it, not in the other
     assert set(combined['private'].families) == {'two'}
     assert combined['shared'].rank == 1
     assert combined['shared'].row()['log10_bf_one'] == pytest.approx(alone.log10_bf)
+
+
+def test_no_nan_when_a_mode_is_impossible():
+    # with full penetrance and no phenocopies, a dominant mode can't explain an affected child of unaffected parents
+    ped = pedigree_from_rows(SIBS)
+    scores = rank_variants(ped, compound_variants(), penetrance=1.0, phenocopy=0.0)
+    for s in scores:
+        assert s.log10_bf is None or s.log10_bf == s.log10_bf
+    assert scores[0].id == 'a + b'
+    trio = pedigree_from_rows([('1', 0, 0, 1, 1), ('2', 0, 0, 2, 1), ('3', '1', '2', 1, 2)])
+    for s in rank_variants(trio, [variant('v', {'1': 1, '2': 0, '3': 1})], penetrance=1.0):
+        assert s.log10_bf == s.log10_bf and s.rank == 1
+
+
+def test_an_unaffected_proband_is_refused():
+    with pytest.raises(ValueError, match='not recorded as affected'):
+        rank_variants(pedigree_from_rows(SIBS), compound_variants(), proband='5')
+
+
+def test_y_and_mitochondrial_variants_are_left_out():
+    ped = pedigree_from_rows(FAMILY)
+    calls = {'1': 1, '3': 1, '6': 1}
+    for chrom in ('Y', 'chrY', 'MT', 'chrM'):
+        s = rank_variants(ped, [variant('v', calls, chrom=chrom)])[0]
+        assert s.log10_bf is None and 'mitochondrial' in s.note and s.rank is None
+
+
+def test_evidence_withheld_for_new_variants_and_halves_of_pairs():
+    trio = pedigree_from_rows([('1', 0, 0, 1, 1), ('2', 0, 0, 2, 1), ('3', '1', '2', 1, 2)])
+    new = rank_variants(trio, [variant('new', {'1': 0, '2': 0, '3': 1})], modes=('AD',))[0]
+    assert new.evidence == '' and 'PS2' in new.notes and new.log10_bf < 0
+    by_id = {s.id: s for s in rank_variants(pedigree_from_rows(SIBS), compound_variants(), modes=('AR',))}
+    assert by_id['a + b'].evidence.startswith('PP1')
+    assert by_id['a'].evidence == '' and 'a + b' in by_id['a'].notes
+    assert by_id['c + d'].log10_bf < 0 and by_id['c'].evidence.startswith('BS4')
+
+
+def test_families_share_the_mode():
+    # family one is clearly dominant; two is a pair of affected brothers with unaffected parents, unclear alone
+    one = pedigree_from_rows(FAMILY, 'one')
+    two = pedigree_from_rows([('b1', 0, 0, 1, 1), ('b2', 0, 0, 2, 1), ('b3', 'b1', 'b2', 1, 2), ('b4', 'b1', 'b2', 1, 2)],
+                             'two')
+    calls = {'1': 1, '2': 0, '3': 1, '4': 0, '5': 0, '6': 1, '7': 0, '8': 1, 'b1': 0, 'b2': 1, 'b3': 1, 'b4': 1}
+    together = rank_variants_across({'one': one, 'two': two}, [variant('v', calls)])[0]
+    known = rank_variants_across({'one': one, 'two': two}, [variant('v', calls)], modes=('AD',))[0]
+    # the families together are clearly dominant, so the mode unknown comes to nearly the same as AD
+    assert together.log10_bf == pytest.approx(known.log10_bf, abs=0.01)
+
+
+def test_pairs_left_out_when_their_locus_is_too_tangled(monkeypatch):
+    from pednet import engine
+    monkeypatch.setattr(engine, 'MAX_STATES', 500)
+    with pytest.warns(UserWarning, match='Pairs of variants in one gene are left out'):
+        scores = rank_variants(pedigree_from_rows(SIBS), compound_variants())
+    assert scores and not any(s.compound for s in scores)

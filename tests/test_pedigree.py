@@ -47,8 +47,16 @@ def test_missing_parents_are_added():
     assert ped['1'].added and ped['1'].sex == 1
     assert ped['2'].added and ped['2'].sex == 2
     father = ped['5'].father
-    assert father == '5~father' and ped[father].placeholder and ped[father].sex == 1
+    assert father == '4~partner' and ped[father].placeholder and ped[father].sex == 1
     assert len(ped.notes) == 3
+
+
+def test_children_with_one_parent_share_the_other():
+    # a father's children whose mother isn't in the file are full siblings, with one unknown mother between them
+    ped = pedigree_from_rows([('1', 0, 0, 1, 1), ('3', '1', 0, 1, 2), ('4', '1', 0, 1, 2), ('5', '1', 0, 2, 1)])
+    assert ped['3'].mother == ped['4'].mother == ped['5'].mother == '1~partner'
+    assert len(ped) == 5
+    assert any('3, 4 and 5 have only a father (1) in the file' in n for n in ped.notes)
 
 
 def test_sex_from_role():
@@ -77,8 +85,13 @@ def test_rows_as_dicts_and_pandas():
             {'FamilyID': 'X', 'IndividualID': 2, 'PaternalID': 0, 'MaternalID': 0, 'Sex': 2, 'Phenotype': 1},
             {'FamilyID': 'X', 'IndividualID': 3, 'PaternalID': 1.0, 'MaternalID': 2.0, 'Sex': 2, 'Phenotype': 2}]
     ped = pedigree_from_rows(rows)
-    assert ped.family == 'X' and ped['3'].father == '1.0'
-    pd = pytest.importorskip('pandas')
+    # a whole number stored as a decimal, as pandas stores a column with blanks, is the same ID as the whole number
+    assert ped.family == 'X' and ped['3'].father == '1'
+    assert pedigree_from_rows([(1, 0, 0, 1.0, 2.0), (2.0, None, None, 2.0, 1.0), (3, 1.0, 2.0, 2.0, 2.0)])['3'].sex == 2
+    try:
+        import pandas as pd
+    except ImportError as error:
+        pytest.skip(f'needs pandas ({error})')
     frame = pd.DataFrame(rows)
     frame['PaternalID'] = frame['PaternalID'].astype(int)
     frame['MaternalID'] = frame['MaternalID'].astype(int)
@@ -123,7 +136,7 @@ def test_write_ped_round_trip(tmp_path):
     assert '~' not in text
     again = read_ped(str(tmp_path / 'out.ped'))['Z']
     assert again['3'].father == '1' and again['5'].mother == '4'
-    assert again['5'].father.endswith('~father')
+    assert again['5'].father == '4~partner'
 
 
 def test_problems():

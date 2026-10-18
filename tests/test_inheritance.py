@@ -115,3 +115,15 @@ def test_mode_log_likelihoods_are_conditional_probabilities():
     # averaged over the default penetrances
     logs = mode_log_likelihoods(pedigree_from_rows([('1', 0, 0, 1, 2)]))
     assert all(np.exp(v) == pytest.approx(np.mean([0.6, 0.8, 0.95, 0.99])) for v in logs.values())
+
+
+def test_impossible_phenotypes_are_said_so():
+    # under AD with full penetrance and no phenocopies, two unaffected parents can't have an affected child
+    sibs = [('1', 0, 0, 1, 1), ('2', 0, 0, 2, 1), ('3', '1', '2', 1, 2)]
+    result = infer_mode(pedigree_from_rows(sibs), modes=('AD',), penetrance=1.0, phenocopy=0.0)
+    assert result.call == 'uncertain' and any('none of the modes allowed' in n for n in result.notes)
+
+
+def test_a_single_affected_person_is_noted():
+    result = infer_mode(pedigree_from_rows([('1', 0, 0, 1, 1), ('2', 0, 0, 2, 1), ('3', '1', '2', 1, 2)]))
+    assert any('only one person is affected' in n for n in result.notes)
