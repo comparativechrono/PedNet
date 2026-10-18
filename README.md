@@ -145,7 +145,7 @@ This makes the pedigree a Bayesian network, and the likelihood of what was seen 
 | Called wrong as dominant or recessive | 0.07 | 0.02 | 0.02 | 0.05 |
 | Mean rank of the causal variant among 21 (original network score) | 3.60 (9.94) | 1.08 (6.48) | 4.44 | 4.88 |
 
-PedNet's ranks are with the mode known, as the original score's are. The causal variant often can't be told from a background variant passed down with it: in 73% of the AD families, some background variant had exactly the causal variant's genotypes in the people sequenced. For compound heterozygotes, among 32 single variants and 6 pairs, the causal pair ranked first in 57% of families and had a mean rank of 1.7, with the mode known; ranking single variants only, the better of the two causal variants had a mean rank of 6.6.
+PedNet's ranks are with the mode known, as the original score's are. The causal variant often can't be told from a background variant passed down with it: in 73% of the AD families, some background variant had exactly the causal variant's genotypes in the people sequenced. For compound heterozygotes, among 32 single variants and 6 pairs, the causal pair had a mean rank of 2.7 with the mode unknown and 1.7 with it known, and ranked first in 54% and 57% of families; ranking single variants only, with the mode unknown, the better of the two causal variants had a mean rank of 6.6.
 
 ```bash
 pip install pandas networkx matplotlib scikit-learn scipy
