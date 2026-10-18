@@ -48,7 +48,7 @@ jobs:
       - name: Test
         run: |
           python -m pip install ".[test]"
-          python -m pytest
+          python -m pytest -o pythonpath=legacy
       - name: Build
         run: |
           python -m pip install build

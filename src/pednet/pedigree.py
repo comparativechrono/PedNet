@@ -283,6 +283,11 @@ class Pedigree:
                     queue.append(c)
         return 10 ** 6
 
+    def to_networkx(self, placeholders: bool = False):
+        """The pedigree as a networkx DAG, with an edge from each parent to each child (see graph.pedigree_graph)"""
+        from .graph import pedigree_graph
+        return pedigree_graph(self, placeholders)
+
     def problems(self) -> List[str]:
         """Things in the family worth checking, besides the notes made while reading it"""
         found = []

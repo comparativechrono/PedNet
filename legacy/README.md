@@ -5,7 +5,7 @@ This folder keeps the original PedNet, which Nick Taylor wrote from the notebook
 - **classify the mode of inheritance** of a pedigree, autosomal dominant (AD) or autosomal recessive (AR), from how the affected people are spread through it
 - **score variants by how well they segregate** with the condition in the family, so that the variant most likely to cause it comes top
 
-The PedNet package (in `src/pednet`) replaces both with likelihood methods, and `benchmarks/benchmark.py` compares the two. The original modules are kept so that the comparison can be rerun, and so that the results already obtained with them can be reproduced. They aren't part of the package on PyPI.
+The PedNet package (in `src/pednet`) has these methods too, rewritten without the original's other requirements: the four network metrics, the classifier of the mode of inheritance and the network score of a variant are in `pednet.features`, and the graph measures in `pednet.graph`. The tests check that they give exactly the same numbers as the code here. The package adds a classifier of all four modes from the pattern of affected people, and the likelihood methods, which treat the pedigree's graph as a Bayesian network; `benchmarks/benchmark.py` compares them all. The original modules are kept so that the results already obtained with them can be reproduced. They aren't part of the package on PyPI.
 
 The pedigrees they are benchmarked on are made by their own pedigree generator, an earlier form of [PedGen](https://github.com/comparativechrono/pedigree-generator), and the pipeline reads pedigree images with an earlier form of [PedInterp](https://github.com/comparativechrono/pedigree-interpreter).
 
