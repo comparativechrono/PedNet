@@ -4,7 +4,7 @@ import networkx as nx
 from sklearn.metrics import accuracy_score, auc
 import numpy as np
 from typing import Dict, Set, Tuple
-from collections import Counter
+from collections import Counter, deque
 
 #---------------------------------------
 # PEDIGREE IMPORT
@@ -34,6 +34,26 @@ def pedfile_readin(pedfile):
 #-------------------------
 # PEDIGREE DAG CONVERSION
 #-------------------------
+def no_parent(parent_id):
+    '''
+    Whether a parent ID means that the parent isn't in the pedigree: 0, however it was read (0, 0.0 or '0'), or a missing value.
+    IDs are read as text when some of them aren't numbers, and as decimals when a column has a missing value
+    '''
+    if parent_id is None:
+        return True
+    try:
+        if pd.isna(parent_id):
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(parent_id).strip()
+    if text == '':
+        return True
+    try:
+        return float(text) == 0
+    except ValueError:
+        return False
+
 def construct_pedigree_graph(df, rm_floaters= True):
     '''
     Constructs a directed acyclic graph representation of a given pedigree.
@@ -67,13 +87,13 @@ def construct_pedigree_graph(df, rm_floaters= True):
         maternal_id = row['MaternalID']
         individual_id = row['IndividualID']
 
-        if paternal_id != 0:
+        if not no_parent(paternal_id):
             G.add_edge(paternal_id, individual_id)
             all_parents_set.add(paternal_id)
-        if maternal_id != 0:
+        if not no_parent(maternal_id):
             G.add_edge(maternal_id, individual_id)
             all_parents_set.add(maternal_id)
-        if maternal_id == 0 and paternal_id == 0:
+        if no_parent(maternal_id) and no_parent(paternal_id):
             founder_set.add(individual_id)
 
     #Removing founders with no children (i.e. floaters)
@@ -123,16 +143,42 @@ def children(G, node):
     return list(G.successors(node))
 
 def generations(G):
-    """Return a dictionary containing a key:value pair for each node (IndividualID=key) where the value is the biological generation that the node belonds to"""
-    lvl={}
-    Q=[(n,0) for n in G if G.in_degree(n)==0]
-    while Q:
-        n,d=Q.pop(0)
-        #this check doesnt take into account children produced from one founder and one relative
-        #leads all individuals to have the generation count to be minimum distance from most recent founder
-        #if n in lvl: continue
-        lvl[n]=d
-        for c in G.successors(n): Q.append((c,d+1))
+    """
+    Return a dictionary containing a key:value pair for each node (IndividualID=key) where the value is the biological generation that the node belongs to,
+    counting from 0 for the oldest generation.
+    Each child is one generation below its parents, so partners share a generation, and someone who married into the family is in their partner's
+    generation, however many of their own ancestors are drawn. Where that can't hold throughout, as when people of different generations have
+    children together, each child is put one generation below its lower parent, and each person with no parents in the pedigree one generation
+    above their highest child. Either way, the generations don't depend on the order of the people.
+    """
+    lvl = {}
+    order = list(nx.topological_sort(G))
+    for component in nx.weakly_connected_components(G):
+        people = [n for n in order if n in component]
+        #spreading out from one person to the whole family, a child one generation below a parent and a parent one above a child
+        level = {people[0]: 0}
+        queue = deque([people[0]])
+        consistent = True
+        while queue:
+            n = queue.popleft()
+            for neighbour, step in [(c, 1) for c in G.successors(n)] + [(p, -1) for p in G.predecessors(n)]:
+                if neighbour not in level:
+                    level[neighbour] = level[n] + step
+                    queue.append(neighbour)
+                elif level[neighbour] != level[n] + step:
+                    consistent = False
+        if not consistent:
+            level = {}
+            for n in people:
+                prnts = list(G.predecessors(n))
+                level[n] = max(level[p] for p in prnts) + 1 if prnts else 0
+            for n in people:
+                kids = list(G.successors(n))
+                if not list(G.predecessors(n)) and kids:
+                    level[n] = min(level[c] for c in kids) - 1
+        oldest = min(level.values())
+        for n, l in level.items():
+            lvl[n] = l - oldest
     return lvl
 
 def longest_path_length(G):
@@ -281,27 +327,31 @@ G (networkx.DiGraph): DAG representation of a given pedigree
 RETURN:
 -------
 ancestry_dict (dict): dictionary depicting the biological ancestors of each one 
-    one item per individual node = IndividualID:[ancestor IndividualIDs]
-consanguinous_nodes (dict): dictionary depicting all nodes that are the result of consanguinous relationships
-    one item per node that results from consanguinous relationship = Consanguinous Child IndividualID: {[Parent IDs], Common Ancestor ID, degree of separation}
+    one item per individual node = IndividualID:{ancestor IndividualIDs}
+consanguinous_nodes (dict): dictionary depicting all nodes that are the result of consanguinous relationships, that is whose two parents are related
+    one item per node that results from consanguinous relationship = Consanguinous Child IndividualID: {'parents': [Parent IDs],
+    'common_ancestor': the parents' closest common ancestor (which may be one of the parents), 'degree_separation': the number of
+    parent-child steps from one parent up to that ancestor and down to the other parent}
 '''
 def consanguinity_analysis(G):
-    revG = G.reverse()
-    ancestry_dict = {}
+    ancestry_dict = {n: nx.ancestors(G, n) for n in G.nodes()}
     consanguinous_nodes = {}
-    for n in revG.nodes():
-        ancestors = nx.descendants(revG, n)
-        ancestry_dict[n] = ancestors
-        ancestry_subgraph = nx.subgraph(revG, [n]+ancestors)
-        for ancestor in ancestors:
-            if ancestry_subgraph.in_degree(ancestor) > 1:
-                parents = list(revG.successors(n))
-                degree_separation = nx.shortest_path(revG, parents[0], ancestor) + nx.shortest_path(revG, parents[1], ancestor)
-                consanguinous_nodes[n] = {
-                    'parents': parents,
-                    'common_ancestor':ancestor,
-                    'degree_separation':degree_separation
-                }
+    for n in G.nodes():
+        prnts = parents(G, n)
+        if len(prnts) != 2:
+            continue
+        first, second = prnts
+        common_ancestors = (ancestry_dict[first] | {first}) & (ancestry_dict[second] | {second})
+        if not common_ancestors:
+            continue
+        def separation(ancestor):
+            return nx.shortest_path_length(G, ancestor, first) + nx.shortest_path_length(G, ancestor, second)
+        closest = min(common_ancestors, key=separation)
+        consanguinous_nodes[n] = {
+            'parents': prnts,
+            'common_ancestor': closest,
+            'degree_separation': separation(closest)
+        }
     return ancestry_dict, consanguinous_nodes
 
 
@@ -334,9 +384,8 @@ def aff_parents_with_unaffected_child(G):
     '''
     unaff_nodes = unaff(G)
     for node in unaff_nodes:
-        sblngs = siblings(G, node)
         prnts = parents(G, node)
-        if len(prnts) == 2 and not any(G.nodes[p]['phenotype'] == 1 for p in prnts) and not any(G.nodes[s]['phenotype'] == 2 for s in sblngs):
+        if len(prnts) == 2 and all(G.nodes[p]['phenotype'] == 2 for p in prnts):
             return True
     return False
 

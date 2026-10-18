@@ -162,6 +162,7 @@ def run_stats_analysis(results_log_path, generation_counts, output_dir='data/MoI
                 else:
                     raise TypeError('Unexpected post hoc results')
 
+                os.makedirs(f'{output_dir}/MetricPostHocSummaries', exist_ok= True)
                 metric_posthoc_df.to_csv(f'{output_dir}/MetricPostHocSummaries/post_hoc_threshold_{metric}.csv')
     
 
@@ -190,6 +191,7 @@ def run_stats_analysis(results_log_path, generation_counts, output_dir='data/MoI
                 else:
                     raise TypeError('Unexpected post hoc results')
 
+                os.makedirs(f'{output_dir}/PerformancePostHocSummaries', exist_ok= True)
                 perf_posthoc_df.to_csv(f'{output_dir}/PerformancePostHocSummaries/post_hoc_perfomance_{perf_metric}.csv')
     
     stats_results_df = pd.DataFrame(stats_results)
@@ -239,6 +241,7 @@ def run_stats_analysis(results_log_path, generation_counts, output_dir='data/MoI
         plt.ylabel(f'{perf_name_dict[perf_metric]}')
         plt.xlabel('Pedigree Size')
         plt.ylim(top=1)
+        os.makedirs(f'{output_dir}/PerformanceViolinPlots', exist_ok= True)
         plt.savefig(f'{output_dir}/PerformanceViolinPlots/{perf_metric}_by_size.png')
         plt.close()
     

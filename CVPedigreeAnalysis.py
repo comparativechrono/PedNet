@@ -391,4 +391,4 @@ if __name__ == '__main__':
         cv2.imwrite(f'{image_path}/{FamilyID}nodesless.png', nodeless_img)
         cv2.imwrite(f'{image_path}/{FamilyID}lines.png', line_img)
 
-    cv2.destroyAllWindows
+    cv2.destroyAllWindows()

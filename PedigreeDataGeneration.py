@@ -5,6 +5,36 @@ from sklearn.metrics import accuracy_score, auc
 from PedigreeDAGAnalysis import aff, unaff, construct_pedigree_graph, plot_pedigree_tree
 
 
+#################### Inheritance Weights ####################
+def inheritance_weights(p, q):
+    '''
+    Genotype probabilities for passing the alternate allele down the family (forward), and for choosing the parents
+    of someone who married in (reverse). p and q are the reference and alternate allele frequencies.
+    Forward, a child's genotype follows Mendel's laws. Reverse, each pair of parental genotypes is weighted by its
+    Hardy-Weinberg frequency times the chance that it gives the child's genotype (Bayes' theorem), so ancestors
+    chosen this way are in Hardy-Weinberg proportions, as people in the population are.
+    '''
+    hardy_weinberg = {0: p**2, 1: 2*p*q, 2: q**2}
+    passes_alt = {0: 0.0, 1: 0.5, 2: 1.0}  # chance that a parent with this genotype passes on the alternate allele
+
+    inheritance_patterns = {'forward_genotypes': {}, 'forward_weights': {},
+                            'reverse_genotypes': {2: [], 1: [], 0: []}, 'reverse_weights': {2: [], 1: [], 0: []}}
+    for paternal in (2, 1, 0):
+        for maternal in (2, 1, 0):
+            a, b = passes_alt[paternal], passes_alt[maternal]
+            child = {2: a*b, 1: a*(1-b) + (1-a)*b, 0: (1-a)*(1-b)}
+            possible = [g for g in (2, 1, 0) if child[g] > 0]
+            #(paternal genotype, maternal genotype) -> [possible child genotypes]
+            inheritance_patterns['forward_genotypes'][(paternal, maternal)] = possible
+            inheritance_patterns['forward_weights'][(paternal, maternal)] = [child[g] for g in possible]
+            #child genotype -> [possible (paternal,maternal) genotypes]
+            for g in possible:
+                inheritance_patterns['reverse_genotypes'][g].append((paternal, maternal))
+                inheritance_patterns['reverse_weights'][g].append(hardy_weinberg[paternal] * hardy_weinberg[maternal] * child[g])
+
+    return inheritance_patterns
+
+
 #################### Pedigree Generator ####################
 '''
 Generates a pedigree based on given metrics
@@ -60,58 +90,6 @@ def pedigree_generator(
             if mode == 'AD':
                 phenotype = 2 if genotype == 2 or genotype == 1 else 1
             return phenotype
-
-        def calc_inheritance_weights(p,q):
-
-            tt = q**4
-            to = 2*p*(q**3)
-            tz = (p**2)*(q**2)
-            oo = 4*(p**2)*(q**2)
-            oz = 2*(p**3)*(q)
-            zz = p**4
-
-            homoRef = p**2
-            hetero = 2*p*q
-            homoAlt = q**2
-
-            inheritance_patterns = {
-                'forward_genotypes': {
-                #(paternal genotype, maternal genotype) -> [possible child genotypes]
-                    (2,2): [2],
-                    (2,1): [2,1],
-                    (1,2): [2,1],
-                    (2,0): [1],
-                    (0,2): [1],
-                    (1,1): [2,1,0],
-                    (0,1): [1,0],
-                    (1,0): [1,0],
-                    (0,0): [0]
-                },
-                'forward_weights': {
-                    (2,2): [1],
-                    (2,1): [1,1],
-                    (1,2): [1,1],
-                    (2,0): [1],
-                    (0,2): [1],
-                    (1,1): [1,2,1],
-                    (0,1): [1,1],
-                    (1,0): [1,1],
-                    (0,0): [1]
-                },
-                #child genotype -> [possible (paternal,maternal) genotypes]
-                'reverse_genotypes': {
-                    2: [(2,2),(2,1),(1,2),(1,1)],
-                    1: [(2,1),(1,2),(2,0),(0,2),(1,1),(1,0),(0,1)],
-                    0: [(1,0),(0,1),(0,0)]
-                },
-                'reverse_weights': {
-                    2: [homoAlt**2, homoAlt*hetero, hetero*homoAlt, hetero**2],
-                    1: [homoAlt*hetero, hetero*homoAlt, homoAlt*homoRef, homoRef*homoAlt, hetero**2, hetero*homoRef, homoRef*hetero],
-                    0: [hetero*homoRef, homoRef*hetero, homoRef**2]
-                }
-            }
-
-            return inheritance_patterns
 
         '''
         Wrapper function that generates the primary founder of the pedigree
@@ -245,7 +223,8 @@ def pedigree_generator(
                 for child in range(random.randint(1, max_children)):
                     child_generator(PaternalID= PaternalID, MaternalID= MaternalID)
                     reproduction_rng = random.randint(1,100)/100
-                    if reproduction_rng <= SpouseLikelihood:
+                    #the first child always has a partner and children, so that the pedigree has as many generations as asked for
+                    if reproduction_rng <= SpouseLikelihood or child == 0:
                         recursive_pedigree_construction(current_generation+1, len(family_df))
 
         #Quality assurance to ensure the generated pedigree has sufficient phenotypic information (>1 affected individuals)
@@ -268,7 +247,7 @@ def pedigree_generator(
             # 3. Construct Inheritence Pattern Dictionary
             #--------------------------------------------
             ref_freq = 1 - alt_freq
-            inheritance_patterns = calc_inheritance_weights(ref_freq, alt_freq)
+            inheritance_patterns = inheritance_weights(ref_freq, alt_freq)
 
             #----------------------------------------
             # 4. Generating Pedigree
@@ -292,12 +271,50 @@ def pedigree_generator(
 
 
 
+#################### Background Variants ####################
+def gene_drop(parents_of, q):
+    '''
+    Genotypes for one variant passed down a pedigree by Mendel's laws.
+
+    PARAMETERS:
+    -----------
+    parents_of (dict): each person's parents, as IndividualID: (parent ID, parent ID), with 0 for a parent who isn't in the pedigree
+    q (float): the variant's alternate allele frequency in the population
+
+    RETURN:
+    -------
+    genotypes (dict): IndividualID: genotype (0, 1 or 2). People with no parents in the pedigree are drawn from the population,
+        in Hardy-Weinberg proportions, and each child gets one allele from each parent at random
+        (an allele from a parent who isn't in the pedigree is drawn from the population)
+    '''
+    p = 1 - q
+    genotypes = {}
+    def genotype(n):
+        if n not in genotypes:
+            known = [parent for parent in parents_of[n] if parent]
+            if not known:
+                genotypes[n] = random.choices([0, 1, 2], [p**2, 2*p*q, q**2])[0]
+            else:
+                alleles = [random.random() < genotype(parent)/2 for parent in known]
+                alleles += [random.random() < q for _ in range(2 - len(known))]
+                genotypes[n] = sum(alleles)
+        return genotypes[n]
+    for n in parents_of:
+        genotype(n)
+    return genotypes
+
+
 #################### Variant Table Generator ####################
 '''
 Generates a variant table with linked variant based on genotype taken from a given pedigree DAG
 
+inherited_background (bool): if True, the background (unlinked) variants are passed down the pedigree by Mendel's laws,
+    as real variants are, so that relatives share them. If False (the default, as before), each person's genotype for a
+    background variant is drawn independently from the population, which makes the linked variant, the only one shared
+    within the family, easier to pick out than it would be in real data
 '''
-def simulate_variant_table(family_df, sequencing_coverage_range, variant_background_range, alt_freq_range, linked_variant = 'chr1:100000_A>T'):
+def simulate_variant_table(family_df, sequencing_coverage_range, variant_background_range, alt_freq_range, linked_variant = 'chr1:100000_A>T',
+                           inherited_background = False):
     family_df.set_index('IndividualID', inplace=True)
     samples = [int(x) for x in family_df.index.values]
 
@@ -324,11 +341,17 @@ def simulate_variant_table(family_df, sequencing_coverage_range, variant_backgro
 
     #filling in unlinked variant table entries using randomly generated gentypes
     min_alt_freq, max_alt_freq = alt_freq_range
+    if inherited_background:
+        parents_of = {int(n): (int(family_df.loc[n]['PaternalID']), int(family_df.loc[n]['MaternalID'])) for n in family_df.index}
     for i in range(n_bg):
         VarID = f'chr1:{100200+i}_G>C'
         q = random.randint(min_alt_freq, max_alt_freq)/100
         p = 1 - q
-        VarTable[VarID] = {sample : random.choices([0,1,2],[p**2, 2*p*q, q**2])[0] for sample in sequenced_samples}
+        if inherited_background:
+            genotypes = gene_drop(parents_of, q)
+            VarTable[VarID] = {sample: genotypes[sample] for sample in sequenced_samples}
+        else:
+            VarTable[VarID] = {sample : random.choices([0,1,2],[p**2, 2*p*q, q**2])[0] for sample in sequenced_samples}
     
     family_df.reset_index(inplace=True)
 
@@ -355,7 +378,10 @@ def PedGraph_VarTable_generator(
             sequencing_coverage_range, 
             
             #PedGraph and VarTable Parameters
-            alt_freq_range
+            alt_freq_range,
+
+            #Background variants passed down the pedigree (see simulate_variant_table)
+            inherited_background = False
             ):
 
     Fam_Data_Dict = {}
@@ -381,12 +407,13 @@ def PedGraph_VarTable_generator(
         var_QC_checks = 0
         var_QC_pass = False
         while not var_QC_pass:
-            var_QC_pass += 1
+            var_QC_checks += 1
             var_dict = simulate_variant_table(
                                             family_df= ped_df,
                                             alt_freq_range = alt_freq_range,
                                             sequencing_coverage_range= sequencing_coverage_range,
-                                            variant_background_range= variant_background_range
+                                            variant_background_range= variant_background_range,
+                                            inherited_background= inherited_background
                                             )
 
             #checking to make sure there more than 2 seuqneced individuals in the pedigree
@@ -409,7 +436,11 @@ def PedGraph_VarTable_generator(
 
 
 #################### Variant Table Backpadding ####################
-def VarTableBackpadding(PedGraph, VariantInfoDict, VariantBackgroundRange, alt_freq_range):
+'''
+Builds a variant table for a real pedigree from known genotypes (VariantInfoDict), padded with simulated background variants.
+inherited_background (bool): pass the background variants down the pedigree by Mendel's laws (see simulate_variant_table)
+'''
+def VarTableBackpadding(PedGraph, VariantInfoDict, VariantBackgroundRange, alt_freq_range, inherited_background = False):
     affected_nodes = aff(G=PedGraph)
     unaffected_nodes = unaff(G=PedGraph)
 
@@ -429,7 +460,7 @@ def VarTableBackpadding(PedGraph, VariantInfoDict, VariantBackgroundRange, alt_f
             elif int(group) in PedGraph.nodes():
                 VarTable[gene][int(group)] = genotype
             else:
-                print('{group}:{genotype} is not a valid entry for genotype data')
+                print(f'{group}:{genotype} is not a valid entry for genotype data')
     
     
     SequencedNodes = set()
@@ -440,10 +471,15 @@ def VarTableBackpadding(PedGraph, VariantInfoDict, VariantBackgroundRange, alt_f
     var_background_min, var_background_max = VariantBackgroundRange
     PaddingCount = random.randint(var_background_min,var_background_max)
     min_alt_freq, max_alt_freq = alt_freq_range
+    parents_of = {n: tuple(PedGraph.predecessors(n)) for n in PedGraph.nodes()}
     for i in range(PaddingCount):
         VarID = f'chr1:{100200+i}_G>C'
         q = random.randint(min_alt_freq, max_alt_freq)/100
         p = 1 - q
-        VarTable[VarID] = {node : random.choices([0,1,2],[p**2, 2*p*q, q**2])[0] for node in SequencedNodes}
+        if inherited_background:
+            genotypes = gene_drop(parents_of, q)
+            VarTable[VarID] = {node: genotypes[node] for node in SequencedNodes}
+        else:
+            VarTable[VarID] = {node : random.choices([0,1,2],[p**2, 2*p*q, q**2])[0] for node in SequencedNodes}
 
     return VarTable   

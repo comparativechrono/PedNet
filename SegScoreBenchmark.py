@@ -22,7 +22,8 @@ OPTIMIZATION_METHOD = 'Rank'
 '''
 A set of helper functions to calculate accuracy metrics to use in evaluating segregation scoring performance.
 Metrics include:
-    - Hit at 1: binary outcome stating whether the linked variant is ranked with the highest segregation score (0.0 for false and 1.0 for true)
+    - Hit at 1: binary outcome stating whether the linked variant is ranked with the highest segregation score (0.0 for false and 1.0 for true).
+      A tie for the highest score shares out the rank (see SegScoreMain.linked_variant_rank), so only an outright highest score counts
     - Inverse Rank (IR): continuous variable meant to represent the degree to which a linked variant is ranked (1/linked variant rank)
     - Discounted Cummulative Gain (DCG): another attempt to represent linked variant ranking through continuous variable with a smoother distribution (1/log2(linked variant rank + 1))
 '''
