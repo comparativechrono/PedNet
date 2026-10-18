@@ -1,16 +1,30 @@
+"""
+Tests of the original modules in legacy/, kept for comparison with the new methods. They need the original
+requirements (pip install -r legacy/requirements.txt), and are skipped without them.
+"""
 import math
 import random
 
-import networkx as nx
-import numpy as np
-import pandas as pd
 import pytest
 
-import PedigreeDataGeneration as PDG
-from ModeClassifierMain import metric_thresholds_determination, youden_threshold
+for _name in ('networkx', 'pandas', 'matplotlib', 'sklearn', 'scipy'):
+    pytest.importorskip(_name)
+# legacy/ is on the path when the tests run from the repository (see pyproject.toml), not from a source distribution
+pytest.importorskip('PedigreeDataGeneration')
+
+import matplotlib  # noqa: E402
+
+matplotlib.use('Agg')
+
+import networkx as nx  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+import PedigreeDataGeneration as PDG  # noqa: E402
+from ModeClassifierMain import metric_thresholds_determination, youden_threshold  # noqa: E402
 from PedigreeDAGAnalysis import (aff_child_with_unaff_parents, aff_parents_with_unaffected_child, consanguinity_analysis,
                                  construct_pedigree_graph, generations)
-from SegScoreMain import alt_depth_ratio, linked_variant_rank, trial_based_segregation_scoring_weight_optimization
+from SegScoreMain import alt_depth_ratio, linked_variant_rank, trial_based_segregation_scoring_weight_optimization  # noqa: E402
 
 
 def pedigree(rows):
