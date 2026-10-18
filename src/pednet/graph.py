@@ -93,27 +93,77 @@ def moral_graph(pedigree: Pedigree, placeholders: bool = True) -> nx.Graph:
 class Loop:
     """
     One of a pedigree's independent loops. people is the people on it in order, and couples the couples on it, as
-    (father, mother). kind is 'consanguinity' if one of the couples is related (a common ancestor of the two partners
-    is in the pedigree), and 'marriage' otherwise: two families married into each other more than once.
+    (father, mother); an unknown partner PedNet added has an ID such as '1~partner'. kind is 'consanguinity' for a
+    loop through a related couple (one with a common ancestor in the pedigree), and 'marriage' for one through no
+    related couple: two families married into each other more than once.
     """
     people: List[str]
     couples: List[Tuple[str, str]]
     kind: str
 
 
+def _node_order(node):
+    return (1, node[1], node[2]) if isinstance(node, tuple) else (0, node, '')
+
+
+def _undirected_mating_graph(pedigree: Pedigree) -> nx.Graph:
+    """
+    The mating graph without its directions, with its nodes and edges in a fixed order, so that the loops found
+    don't depend on the order of the lines in the PED file
+    """
+    directed = mating_graph(pedigree)
+    graph = nx.Graph(family=pedigree.family)
+    for n in sorted(directed, key=_node_order):
+        graph.add_node(n, **directed.nodes[n])
+    edges = [tuple(sorted(e, key=_node_order)) for e in directed.edges]
+    graph.add_edges_from(sorted(edges, key=lambda e: (_node_order(e[0]), _node_order(e[1]))))
+    return graph
+
+
+def _related(pedigree: Pedigree, a: str, b: str) -> bool:
+    """Whether two people share an ancestor in the pedigree (or one is the other's)"""
+    return bool((pedigree.ancestors(a) | {a}) & (pedigree.ancestors(b) | {b}))
+
+
 def loops(pedigree: Pedigree) -> List[Loop]:
     """
     The independent loops of the pedigree: a cycle basis of the mating graph without its directions (by Paton's
-    algorithm, as networkx finds it). Their number is the cyclomatic number of that graph, its edges less its nodes
-    plus the number of its connected parts (see loop_count).
+    algorithm, as networkx finds it), the loops from consanguinity first. Their number is the cyclomatic number of
+    that graph, its edges less its nodes plus the number of its connected parts (see loop_count).
+
+    Which loops make up a basis is a matter of choice, but how many of them come from consanguinity is not: the
+    marriage loops are a basis of the graph without the related couples' nodes, and the rest of the basis, which
+    must pass through a related couple, are the loops from consanguinity.
     """
-    graph = mating_graph(pedigree).to_undirected()
+    graph = _undirected_mating_graph(pedigree)
+    related = {n for n, data in graph.nodes(data=True)
+               if data.get('kind') == 'mating' and _related(pedigree, n[1], n[2])}
+    # each cycle as a set of edges, a vector over GF(2), so as to keep only cycles independent of those kept already
+    edge_index: Dict[frozenset, int] = {}
+    kept: Dict[int, int] = {}
+
+    def independent(cycle) -> bool:
+        vector = 0
+        for k, node in enumerate(cycle):
+            edge = frozenset((node, cycle[(k + 1) % len(cycle)]))
+            vector ^= 1 << edge_index.setdefault(edge, len(edge_index))
+        while vector:
+            top = vector.bit_length() - 1
+            if top not in kept:
+                kept[top] = vector
+                return True
+            vector ^= kept[top]
+        return False
+
     found = []
-    for cycle in nx.cycle_basis(graph):
-        people = [n for n in cycle if graph.nodes[n].get('kind') == 'person']
-        couples = [(n[1], n[2]) for n in cycle if graph.nodes[n].get('kind') == 'mating']
-        related = any((pedigree.ancestors(f) | {f}) & (pedigree.ancestors(m) | {m}) for f, m in couples)
-        found.append(Loop(people, couples, 'consanguinity' if related else 'marriage'))
+    unrelated = graph.subgraph([n for n in graph if n not in related])
+    for kind, cycles in (('marriage', nx.cycle_basis(unrelated)), ('consanguinity', nx.cycle_basis(graph))):
+        for cycle in cycles:
+            if independent(cycle):
+                people = [n for n in cycle if graph.nodes[n].get('kind') == 'person']
+                couples = [(n[1], n[2]) for n in cycle if graph.nodes[n].get('kind') == 'mating']
+                found.append(Loop(people, couples, kind))
+    found.sort(key=lambda loop: loop.kind != 'consanguinity')
     return found
 
 
@@ -128,7 +178,8 @@ def kinship_matrix(pedigree: Pedigree, x_linked: bool = False) -> Tuple[List[str
     """
     Malécot's kinship coefficients of every pair of people: the probability that a gene drawn at random from one
     and a gene drawn from the other, at the same place, are identical by descent. On the diagonal is each person's
-    own coefficient, (1 + F) / 2 for inbreeding coefficient F. Founders are taken as unrelated and not inbred.
+    own coefficient, (1 + F) / 2 for inbreeding coefficient F (on the X, 1 for a man, who has one copy). Founders
+    are taken as unrelated and not inbred.
 
     The coefficients are worked out in the order of the DAG, parents before children, by the recursion that sums
     Wright's path coefficients over every path through a common ancestor: a person's kinship with anyone not their
@@ -145,7 +196,7 @@ def kinship_matrix(pedigree: Pedigree, x_linked: bool = False) -> Tuple[List[str
     position = {pid: k for k, pid in enumerate(ids)}
     n = len(ids)
     phi = np.zeros((n, n))
-    done: List[int] = []
+    done = np.zeros(n, dtype=bool)      # the people worked out so far, none of them descended from the next
     for pid in order:
         p = pedigree[pid]
         i = position[pid]
@@ -170,10 +221,10 @@ def kinship_matrix(pedigree: Pedigree, x_linked: bool = False) -> Tuple[List[str
             else:
                 row = 0.5 * (phi[m] + 0.5 * (phi[f] + phi[m]))
                 self_kinship = 0.5 * (1.0 + 0.5 * (1 + phi[f, m]))
-        for j in done:
-            phi[i, j] = phi[j, i] = row[j]
+        phi[i, done] = row[done]
+        phi[done, i] = row[done]
         phi[i, i] = self_kinship
-        done.append(i)
+        done[i] = True
     return ids, phi
 
 
@@ -186,7 +237,8 @@ def kinship(pedigree: Pedigree, a: str, b: str, x_linked: bool = False) -> float
 def inbreeding(pedigree: Pedigree, x_linked: bool = False) -> Dict[str, float]:
     """
     Each person's inbreeding coefficient: the kinship coefficient of their parents, the probability that their two
-    copies are identical by descent (0 for a founder, and on the X for a man, who has one copy)
+    copies are identical by descent (0 for a founder, and on the X for a man, who has one copy). On the X, someone
+    of unknown sex has half their parents' kinship, being a woman, with two copies, with probability one half.
     """
     ids, phi = kinship_matrix(pedigree, x_linked)
     position = {pid: k for k, pid in enumerate(ids)}
@@ -257,8 +309,8 @@ def _name(up: int, down: int, sex: int, full: bool) -> str:
     def pick(m, f, either):
         return m if male else (f if female else either)
 
-    if full == 'double' and up == down == 2:
-        return 'double first cousin'
+    if full == 'double' and up >= 2 and down >= 2:
+        return 'double ' + _ordinal(min(up, down) - 1) + ' cousin' + _removed(abs(up - down))
 
     if up == 0 and down == 0:
         return 'self'
@@ -278,13 +330,17 @@ def _name(up: int, down: int, sex: int, full: bool) -> str:
     return half + _ordinal(min(up, down) - 1) + ' cousin' + _removed(abs(up - down))
 
 
-def relationship(pedigree: Pedigree, a: str, b: str) -> Relationship:
+def relationship(pedigree: Pedigree, a: str, b: str,
+                 matrix: Optional[Tuple[List[str], np.ndarray]] = None) -> Relationship:
     """
     How b is related to a, by the shortest path up from a to a common ancestor and down to b. The relationship is
     full (sister rather than half-sister) when the closest common ancestors include a couple, both of whom are at
-    that distance. Partners who aren't related by descent are 'unrelated' (the pedigree draws them as partners).
+    that distance, and double (double first cousin) when they include two couples. Partners who aren't related by
+    descent are 'unrelated'. via can include the unknown partners PedNet adds, with IDs such as '1~partner'.
+    matrix is the pedigree's kinship_matrix, if it has been worked out already, which saves working it out again
+    for each pair of a large family.
     """
-    ids, phi = kinship_matrix(pedigree)
+    ids, phi = kinship_matrix(pedigree) if matrix is None else matrix
     position = {pid: k for k, pid in enumerate(ids)}
     value = float(phi[position[a], position[b]])
     above_a, above_b = _steps_up(pedigree, a), _steps_up(pedigree, b)
@@ -382,25 +438,28 @@ class Elimination:
     """
     The order in which the genotypes are summed out for exact likelihoods, from the moral graph. width is the most
     people in one step's table, so width - 1 bounds the treewidth of the moral graph from above, and the cost of a
-    likelihood grows as the number of genotype states to the power of width.
+    likelihood grows as the number of genotype states to the power of width. exact is whether the largest table is
+    small enough for PedNet to work out exact likelihoods at all.
     """
     order: List[str]
     width: int
     largest_table: int
+    exact: bool = True
 
 
 def elimination(pedigree: Pedigree, x_linked: bool = False) -> Elimination:
-    """The elimination order PedNet's likelihood engine uses for the pedigree (see engine.Plan)"""
+    """The elimination order PedNet's likelihood engine uses for the pedigree (see engine.Plan), however large"""
     from .engine import Network
-    net = Network(pedigree, x_linked)
+    net = Network(pedigree, x_linked, check=False)
     order = [net.ids[var] for _, var, _, _ in net.plan.steps]
-    return Elimination(order, net.plan.width, net.plan.largest)
+    return Elimination(order, net.plan.width, net.plan.largest, net.plan.feasible)
 
 
 def write_graph(pedigree: Pedigree, path, mating: bool = False):
     """
     Writes the pedigree graph (or the mating graph) as GraphML, for network tools such as Gephi or Cytoscape. The
-    couples' nodes of the mating graph are named 'mating:father:mother'.
+    couples' nodes of the mating graph are named 'mating:father:mother', where an unknown partner PedNet added has
+    an ID such as '1~partner'.
     """
     graph = mating_graph(pedigree) if mating else pedigree_graph(pedigree)
     if mating:

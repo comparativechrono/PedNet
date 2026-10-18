@@ -6,6 +6,7 @@ A father or mother of 0 means that parent isn't in the file.
 """
 import io
 import numbers
+import re
 from collections import deque
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -111,6 +112,20 @@ class Pedigree:
 
     def _complete(self):
         """Add missing parents, give each parent the sex of their role, and check that no one is both a father and a mother"""
+        # a parent written as a decimal (1.0), as a file saved from a table with blanks in its parent columns can
+        # have them, is the person with the whole-number ID (1), if no one has the decimal ID itself
+        renamed = set()
+        for p in self.people:
+            for role in ('father', 'mother'):
+                parent = getattr(p, role)
+                if parent is None or parent in self.index:
+                    continue
+                whole = parent.split('.')[0] if re.fullmatch(r'-?\d+\.0+', parent) else None
+                if whole is not None and whole in self.index:
+                    setattr(p, role, whole)
+                    renamed.add((parent, whole))
+        for parent, whole in sorted(renamed):
+            self.notes.append(f'the parent {parent} is taken to be {whole}, the same number written without decimals')
         fathers = {p.father for p in self.people if p.father is not None}
         mothers = {p.mother for p in self.people if p.mother is not None}
         both = fathers & mothers

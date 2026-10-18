@@ -112,8 +112,9 @@ class VariantScore:
     it is near 0 for a variant whose genotypes say nothing, and evidence is its strength as evidence for
     co-segregation (PP1) or against it (BS4). evidence is left blank, and evidence_withheld says why, for a variant
     that may be new in an affected person and is otherwise consistent with the family (for PS2 or PM6 to judge,
-    not PP1 or BS4), and for one that is part of a pair which co-segregates (log10 BF above 0), and better than it
-    does on its own. best_mode is the most probable mode of inheritance if the candidate is the cause.
+    not PP1 or BS4), and for one that is part of a pair which is evidence for co-segregation (PP1, a log10 BF of
+    0.318 or more) and better evidence than the variant alone. best_mode is the most probable mode of inheritance if
+    the candidate is the cause. log10_bf is None, and note says why, for a candidate that can't be scored.
 
     mode_probability is the probability, from the phenotypes, that the mode is one that suits the candidate
     (autosomal or X-linked, or recessive for a pair), and log10_odds = log10_bf + log10(mode_probability): the
@@ -336,6 +337,8 @@ def rank_variants(pedigree: Pedigree, variants: Iterable[Variant], modes: Sequen
             s.note = 'Y-linked and mitochondrial inheritance aren\'t modelled'
         elif not s.genotyped:
             s.note = 'no one in the family was genotyped for it'
+        elif s.note == _IMPOSSIBLE:
+            continue
         elif not s.log10_lr:
             s.note = 'none of the modes allowed suits its chromosome'
         else:
@@ -358,7 +361,18 @@ def rank_variants(pedigree: Pedigree, variants: Iterable[Variant], modes: Sequen
 
 
 def _set_mode(score: 'VariantScore', mode: str, log_with: float, log_without: float):
-    """Records the log likelihood of the phenotypes under a mode with the candidate as the cause, and the ratio"""
+    """
+    Records the log likelihood of the phenotypes under a mode with the candidate as the cause, and the ratio. A
+    likelihood of NaN comes from genotypes that have no probability at all (0 / 0), which only an error rate of 0 and
+    a Mendelian error can give: the candidate then can't be judged, and is left without a score.
+    """
+    if log_with != log_with:
+        score.note = _IMPOSSIBLE
+        score.log_likelihood.clear()
+        score.log10_lr.clear()
+        return
+    if score.note == _IMPOSSIBLE:
+        return
     score.log_likelihood[mode] = log_with
     with np.errstate(invalid='ignore'):
         ratio = (log_with - log_without) / LN10
@@ -412,8 +426,8 @@ def _withhold_evidence(pedigree: Pedigree, scores: List['VariantScore'], pair_sc
         pair = best_pair.get(id(s.variant))
         if _new_in_affected(pedigree, s):
             s.evidence_withheld = _NEW
-        elif pair is not None and pair.log10_bf > max(s.log10_bf, 0.0) + 1e-9:
-            # the pair co-segregates, and better than the variant alone
+        elif pair is not None and evidence_strength(pair.log10_bf).startswith('PP1') and pair.log10_bf > s.log10_bf:
+            # the pair is evidence for co-segregation, and better evidence than the variant alone
             s.evidence_withheld = f'judge it with its pair, {pair.id} (log10 BF {pair.log10_bf:.2f})'
     for p in pair_scores:
         if p.log10_bf is not None and _new_in_affected(pedigree, p):
@@ -421,6 +435,8 @@ def _withhold_evidence(pedigree: Pedigree, scores: List['VariantScore'], pair_sc
 
 
 _NEW = 'co-segregation can\'t judge a variant new in an affected person: see PS2 and PM6 instead'
+_IMPOSSIBLE = ('its genotypes can\'t have been passed down without a genotyping error, and the error rate is 0, so it '
+               'isn\'t scored')
 
 
 def _new_in_affected(pedigree: Pedigree, s: 'VariantScore') -> bool:
@@ -598,7 +614,9 @@ def _score_batch(pedigree, net, variants, scores, modes, models, pens, log_w, va
             phen = np.stack([phenotype_factor(model.with_(penetrance=f), kind, person.phenotype) for f in pens])
             unary.append((phen[:, None, :] * evidence[i][None, :, :]).reshape(F * V, -1))
         joint = net.log_likelihood(unary).reshape(F, V)
-        with_variant = _logsumexp(joint + log_w[:, None], axis=0) - log_genotypes
+        with np.errstate(invalid='ignore'):
+            # NaN where the genotypes have no probability at all (see _set_mode)
+            with_variant = _logsumexp(joint + log_w[:, None], axis=0) - log_genotypes
         for s, value in zip(scores, with_variant):
             _set_mode(s, mode, float(value), log_without[mode])
 
@@ -609,18 +627,23 @@ class CombinedScore:
     A candidate's evidence from several families with the same condition, over the families in which an affected
     person (the family's proband, if given) carries it, whose scores are in families. A family in which no affected
     person carries it counts only towards the mode of inheritance, since the condition may have another cause there.
-    log10_bf is the log10 Bayes factor over those families together, with the mode shared between them: for a
-    single mode it is the sum of the families' log10 likelihood ratios. mode_probability is the probability, from
-    all the families' phenotypes, that the mode is one that suits the candidate, and log10_odds is log10_bf +
-    log10(mode_probability), as for VariantScore.
+
+    log10_bf is the log10 Bayes factor over those families together, with the mode of inheritance shared between
+    them. With one mode allowed it is the sum of the families' log10 Bayes factors. With several, each mode is
+    weighted by how well it explains all the families together, so the evidence is less than the sum when the
+    families point to different modes, and each family's own log10_bf (in families) is for the modes weighted by
+    that family alone. mode_probability is the probability, from all the families' phenotypes, that the mode is one
+    that suits the candidate, and log10_odds is log10_bf + log10(mode_probability), as for VariantScore. log10_bf is
+    None, and note says why, when the candidate can't be scored in one of the families.
     """
     id: str
-    log10_bf: float
+    log10_bf: Optional[float]
     families: Dict[str, VariantScore]
     rank: Optional[float] = None
     log10_odds: Optional[float] = None
     mode_probability: Optional[float] = None
     evidence_withheld: str = ''
+    note: str = ''
 
     @property
     def evidence(self) -> str:
@@ -640,6 +663,7 @@ class CombinedScore:
                'families': ','.join(self.families)}
         for name, s in self.families.items():
             row[f'log10_bf_{name}'] = s.log10_bf
+        row.update(evidence_withheld=self.evidence_withheld, note=self.note)
         return row
 
 
@@ -673,28 +697,35 @@ def rank_variants_across(pedigrees, variants: Iterable[Variant], probands: Optio
                                              [proband] if proband else None)
         who = [proband] if proband else pedigree.affected()
         for s in rank_variants(pedigree, variants, proband=proband, **options):
-            if s.log10_bf is None or not s.log_likelihood:
-                continue
             if s.partner is None and not any((s.variant.genotypes.get(p) or 0) >= 1 for p in who):
+                continue
+            if s.note != _IMPOSSIBLE and (s.log10_bf is None or not s.log_likelihood):
                 continue
             found.setdefault((id(s.variant), id(s.partner)), {})[name] = s
     log_all = _logsumexp([log_priors[m] + sum(without[f][m] for f in pedigrees) for m in log_priors])
     combined = []
     for by_family in found.values():
         first = next(iter(by_family.values()))
+        c = CombinedScore(first.id, None, by_family)
+        combined.append(c)
+        unscored = [f for f, s in by_family.items() if s.note == _IMPOSSIBLE]
+        if unscored:
+            c.note = (f'its genotypes in {", ".join(unscored)} can\'t have been passed down without a genotyping '
+                      'error, and the error rate is 0, so it isn\'t scored')
+            continue
         suited = [m for m in first.log_likelihood if m in log_priors]
         with_modes = [log_priors[m] + sum(by_family[f].log_likelihood[m] if f in by_family else without[f][m]
                                           for f in pedigrees) for m in suited]
         suited_without = [log_priors[m] + sum(without[f][m] for f in pedigrees) for m in suited]
         log_with, log_suited = _logsumexp(with_modes), _logsumexp(suited_without)
-        c = CombinedScore(first.id, float('nan'), by_family)
-        if np.isfinite(log_suited) and np.isfinite(log_all):
+        if not (np.isfinite(log_suited) and np.isfinite(log_all)):
+            c.note = 'the families\' phenotypes rule out every mode that suits its chromosome'
+        else:
             c.log10_bf = float((log_with - log_suited) / LN10)
             c.mode_probability = float(np.exp(log_suited - log_all))
             c.log10_odds = float((log_with - log_all) / LN10)
         if any(s.evidence_withheld for s in by_family.values()):
             c.evidence_withheld = next(s.evidence_withheld for s in by_family.values() if s.evidence_withheld)
-        combined.append(c)
     for c, r in zip(combined, fair_ranks([c.log10_odds for c in combined])):
         c.rank = r
     combined.sort(key=lambda c: (c.rank is None, c.rank if c.rank is not None else 0))

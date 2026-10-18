@@ -59,6 +59,16 @@ def test_children_with_one_parent_share_the_other():
     assert any('3, 4 and 5 have only a father (1) in the file' in n for n in ped.notes)
 
 
+def test_parents_written_as_decimals():
+    # a file saved from a table with blanks in its parent columns can give the parents as 1.0 and 2.0
+    ped = read_ped('F 1 0 0 1 1\nF 2 0 0 2 1\nF 3 1.0 2.0 1 2\n')['F']
+    assert ped['3'].father == '1' and ped['3'].mother == '2' and len(ped) == 3
+    assert any('1.0 is taken to be 1' in n for n in ped.notes)
+    # but not when someone has the decimal ID itself
+    ped = read_ped('F 1 0 0 1 1\nF 1.0 0 0 1 1\nF 2 0 0 2 1\nF 3 1.0 2 1 2\n')['F']
+    assert ped['3'].father == '1.0'
+
+
 def test_sex_from_role():
     ped = pedigree_from_rows([('1', 0, 0, 2, 1), ('2', 0, 0, 0, 1), ('3', '1', '2', 1, 2)])
     assert ped['1'].sex == 1 and ped['2'].sex == 2

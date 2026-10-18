@@ -160,7 +160,56 @@ def test_elimination():
     ped = pedigree_from_rows(COUSINS)
     plan = g.elimination(ped)
     assert sorted(plan.order) == sorted(ped.ids)
-    assert plan.width >= 3 and plan.largest_table == 3 ** plan.width
+    assert plan.width >= 3 and plan.largest_table == 3 ** plan.width and plan.exact
+
+
+def test_elimination_of_a_pedigree_too_tangled(monkeypatch):
+    # the plan is still worked out and reported when exact likelihoods would need too large a table
+    from pednet import engine
+    monkeypatch.setattr(engine, 'MAX_STATES', 10)
+    plan = g.elimination(pedigree_from_rows(COUSINS))
+    assert not plan.exact and plan.largest_table > 10
+    with pytest.raises(ValueError, match='too many loops'):
+        engine.Network(pedigree_from_rows(COUSINS), False)
+
+
+def test_table_sizes_never_overflow():
+    # 3 ** 41 is beyond NumPy's 64-bit whole numbers, which would wrap round to a negative size and pass the check
+    from pednet.engine import Plan
+    plan = Plan([tuple(range(41))], [3] * 41, check=False)
+    assert plan.largest == 3 ** 41 and not plan.feasible
+    with pytest.raises(ValueError):
+        Plan([tuple(range(41))], [3] * 41)
+
+
+def test_loop_kinds_dont_depend_on_the_order_of_the_lines():
+    # the double first cousins i and j marry: one loop from the marriages of the brothers and sisters, and one from
+    # the cousins' marriage, whichever basis is chosen and however the lines of the file are ordered
+    import random
+    rows = DOUBLE + [('k', 'i', 'j', 1, 2)]
+    first = g.loops(pedigree_from_rows(rows))
+    assert [loop.kind for loop in first] == ['consanguinity', 'marriage']
+    shuffle = random.Random(5)
+    for _ in range(30):
+        shuffled = rows[:]
+        shuffle.shuffle(shuffled)
+        again = g.loops(pedigree_from_rows(shuffled))
+        assert [(loop.kind, loop.people) for loop in again] == [(loop.kind, loop.people) for loop in first]
+
+
+def test_double_cousins_beyond_the_first():
+    # the children of the double first cousins i and j (by partners from outside) are double second cousins
+    rows = DOUBLE + [('x', 0, 0, 2, 1), ('y', 0, 0, 1, 1), ('m', 'i', 'x', 1, 1), ('n', 'y', 'j', 2, 1)]
+    r = g.relationship(pedigree_from_rows(rows), 'm', 'n')
+    assert (r.name, r.degree) == ('double second cousin', 5) and r.kinship == pytest.approx(2 / 64)
+    once_removed = g.relationship(pedigree_from_rows(rows), 'i', 'n')
+    assert once_removed.name == 'double first cousin once removed'
+
+
+def test_relationship_with_the_matrix_given():
+    ped = pedigree_from_rows(COUSINS)
+    matrix = g.kinship_matrix(ped)
+    assert g.relationship(ped, '7', '8', matrix) == g.relationship(ped, '7', '8')
 
 
 def test_write_graph(tmp_path):

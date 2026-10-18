@@ -135,10 +135,13 @@ def _graph(args) -> int:
         print(f'  width {pedgraph.pedigree_width(pedigree)} (the most people no one of whom is another\'s ancestor)')
         plan = pedgraph.elimination(pedigree)
         print(f'  exact likelihoods: elimination width {plan.width}, so the moral graph\'s treewidth is at most '
-              f'{plan.width - 1}')
+              f'{plan.width - 1}' + ('' if plan.exact else
+                                     f'; too many loops for exact likelihoods (a table of {plan.largest_table:,} '
+                                     'states)'))
         affected = pedigree.affected()
         pairs = [(a, b) for i, a in enumerate(affected) for b in affected[i + 1:]]
-        named = [(a, b, pedgraph.relationship(pedigree, a, b)) for a, b in pairs]
+        matrix = pedgraph.kinship_matrix(pedigree)
+        named = [(a, b, pedgraph.relationship(pedigree, a, b, matrix)) for a, b in pairs]
         named = [x for x in named if x[2].degree is not None]
         named.sort(key=lambda x: (-x[2].kinship, x[0], x[1]))
         if named:
@@ -267,13 +270,15 @@ def _rank_across(args, families, variants, options) -> int:
     print(f'Families {", ".join(families)}: {_count(len(combined), "candidate")} carried by an affected person in at '
           'least one family, the most likely cause over the families first')
     shown = combined[:args.top] if args.top else combined
-    header = ['rank', 'candidate', 'log10 odds', 'log10 BF', 'evidence', 'families (log10 BF)']
+    header = ['rank', 'candidate', 'log10 odds', 'log10 BF', 'evidence', 'each family\'s own log10 BF']
     table = [[_format(c.rank, 1), c.id, _format(c.log10_odds), _format(c.log10_bf), c.evidence or '-',
-              ', '.join(f'{name} {s.log10_bf:.2f}' for name, s in c.families.items())] for c in shown]
-    withheld = [c for c in shown if c.evidence_withheld]
+              ', '.join(f'{name} {_format(s.log10_bf)}' for name, s in c.families.items())] for c in shown]
     _print_table(header, table)
-    for c in withheld:
-        print(f'note: no evidence is given for {c.id}: {c.evidence_withheld}')
+    for c in shown:
+        if c.note:
+            print(f'note: {c.id}: {c.note}')
+        elif c.evidence_withheld:
+            print(f'note: no evidence is given for {c.id}: {c.evidence_withheld}')
     if args.top and len(combined) > args.top:
         print(f'... and {len(combined) - args.top} more' + (f' (all in {args.out})' if args.out else ''))
     return 0
@@ -326,8 +331,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     rank = sub.add_parser('rank', help='candidate variants ranked by co-segregation with the condition',
                           description='Ranks candidate variants by how well they co-segregate with the condition. '
                           'With several families in the PED file (and no --family), the families are taken to have '
-                          'the same condition, and each candidate is ranked by its evidence summed over the families '
-                          'in which an affected person carries it.')
+                          'the same condition, with one mode of inheritance, and each candidate is ranked by its '
+                          'evidence over the families in which an affected person carries it: the sum of their log10 '
+                          'Bayes factors when the mode is given (--modes AD, say), and otherwise less than the sum if '
+                          'the families point to different modes.')
     _common(rank)
     rank.add_argument('variants', help='a VCF file (.vcf or .vcf.gz), or a table with a column per person')
     rank.add_argument('--frequency-key', default='AF', help='the INFO field with the allele frequency (default: AF)')

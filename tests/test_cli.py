@@ -146,6 +146,20 @@ def test_graph(files, capsys, tmp_path):
     assert main(['graph', str(files / 'two.ped'), '--kinship', str(kin)]) == 1
 
 
+def test_graph_of_a_pedigree_too_tangled_for_likelihoods(files, capsys, monkeypatch):
+    # the graph measures don't need the likelihoods, so they are all given even when exact likelihoods aren't possible
+    from pednet import engine
+    monkeypatch.setattr(engine, 'MAX_STATES', 10)
+    assert main(['graph', str(files / 'f.ped')]) == 0
+    out = capsys.readouterr().out
+    assert 'too many loops for exact likelihoods' in out and 'pattern features' in out and 'most central' in out
+
+
+def test_ranking_several_families_with_no_errors_allowed(files, capsys):
+    assert main(['rank', str(files / 'two.ped'), str(files / 'two.vcf'), '--error-rate', '0']) == 0
+    assert 'Traceback' not in capsys.readouterr().err
+
+
 def test_mode_by_graph(files, capsys):
     assert main(['mode', str(files / 'f.ped'), '--method', 'patterns']) == 0
     assert 'from the pattern of affected people: autosomal dominant' in capsys.readouterr().out

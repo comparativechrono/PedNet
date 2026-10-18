@@ -15,6 +15,7 @@ The genotype at the locus is a variable whose states the locus defines: by defau
 alternate allele (see models), and for a pair of variants in one gene, the pair of haplotypes a person carries
 (see compound).
 """
+import math
 import string
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -31,9 +32,12 @@ MAX_STATES = 50_000_000
 
 
 class Plan:
-    """The order in which to sum out the genotypes, and which tables each step combines"""
+    """
+    The order in which to sum out the genotypes, and which tables each step combines. feasible is whether the
+    largest table is small enough for exact likelihoods; if it isn't, a ValueError is raised, unless check is False.
+    """
 
-    def __init__(self, scopes: Sequence[Tuple[int, ...]], domains: Sequence[int]):
+    def __init__(self, scopes: Sequence[Tuple[int, ...]], domains: Sequence[int], check: bool = True):
         n = len(domains)
         factor_vars: Dict[int, Tuple[int, ...]] = {f: tuple(s) for f, s in enumerate(scopes)}
         var_factors: Dict[int, set] = {v: set() for v in range(n)}
@@ -64,7 +68,8 @@ class Plan:
             union = sorted(set().union(*(factor_vars[f] for f in involved)) | {v})
             out = tuple(u for u in union if u != v)
             self.width = max(self.width, len(union))
-            self.largest = max(self.largest, int(np.prod([domains[u] for u in union])))
+            # math.prod, whose whole numbers can't overflow as NumPy's 64-bit ones would for a very wide table
+            self.largest = max(self.largest, math.prod(domains[u] for u in union))
             self.steps.append((involved, v, out, next_factor))
             for f in involved:
                 for u in factor_vars.pop(f):
@@ -83,7 +88,8 @@ class Plan:
                 for w in neighbours.get(u, ()):
                     cache.pop(w, None)
             next_factor += 1
-        if self.width > len(_LETTERS) or self.largest > MAX_STATES:
+        self.feasible = self.width <= len(_LETTERS) and self.largest <= MAX_STATES
+        if check and not self.feasible:
             raise ValueError('This pedigree has too many loops for exact likelihoods: summing out its genotypes '
                              f'needs a table of {self.largest:,} states')
 
@@ -101,10 +107,11 @@ class Network:
     having no children, can be summed over as either).
 
     locus, if given, defines the genotypes' states instead of the single biallelic variant of models: an object with
-    domain(kind), the number of states, and transmission(kind), the [child, father, mother] table.
+    domain(kind), the number of states, and transmission(kind), the [child, father, mother] table. check False makes
+    a network whose plan can be looked at even when it is too large to work with (see Plan).
     """
 
-    def __init__(self, pedigree: Pedigree, x_linked: bool, locus=None):
+    def __init__(self, pedigree: Pedigree, x_linked: bool, locus=None, check: bool = True):
         self.pedigree = pedigree
         self.x_linked = x_linked
         self.ids = pedigree.ids
@@ -136,7 +143,7 @@ class Network:
         self._n_transmission = len(scopes)
         scopes.extend((i,) for i in range(len(self.ids)))
         self.scopes = scopes
-        self.plan = Plan(scopes, self.domains)
+        self.plan = Plan(scopes, self.domains, check)
         self.founders = [i for i, par in enumerate(self.parents) if par is None]
 
     def index(self, person_id: str) -> int:

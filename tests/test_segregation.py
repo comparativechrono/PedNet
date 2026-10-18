@@ -277,6 +277,45 @@ def test_families_share_the_mode():
     assert together.log10_bf == pytest.approx(known.log10_bf, abs=0.01)
 
 
+def test_impossible_genotypes_with_no_errors_allowed():
+    # with an error rate of 0, a Mendelian error makes the genotypes impossible: the variant isn't scored, rather than
+    # given a false BS4_Strong or a NaN, alone, as a pair or over several families
+    import warnings
+    ped = pedigree_from_rows(FAMILY)
+    error = {'1': 1, '2': 0, '3': 1, '4': 0, '5': 0, '6': 1, '7': 0, '8': 2}   # 8 can't have two copies
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        by_id = {s.id: s for s in rank_variants(ped, [variant('error', error), variant('fine', dict(error, **{'8': 1}))],
+                                                error_rate=0)}
+    assert by_id['error'].log10_bf is None and by_id['error'].rank is None and by_id['error'].evidence == ''
+    assert 'error rate is 0' in by_id['error'].notes and by_id['fine'].rank == 1
+    assert np.isfinite(rank_variants(ped, [variant('error', error)])[0].log10_bf)
+    two = pedigree_from_rows([(f'b{pid}', f'b{f}' if f else 0, f'b{m}' if m else 0, s, p) for pid, f, m, s, p in FAMILY],
+                             'two')
+    calls = dict(error, **{f'b{k}': v for k, v in dict(error, **{'8': 1}).items()})
+    combined = rank_variants_across({'one': ped, 'two': two}, [variant('error', calls)], error_rate=0)[0]
+    assert combined.log10_bf is None and combined.rank is None and combined.evidence == ''
+    assert 'in one ' in combined.note and set(combined.families) == {'one', 'two'}
+    a, b = compound_variants()[:2]
+    bad = variant('a', dict(a.genotypes, **{'3': 2}), gene='G')                # 3 can't have two copies of a
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        scores = {s.id: s for s in rank_variants(pedigree_from_rows(SIBS), [bad, b], error_rate=0)}
+    assert scores['a + b'].log10_bf is None and 'error rate is 0' in scores['a + b'].notes
+
+
+def test_evidence_withheld_only_for_a_pair_with_evidence():
+    from pednet.segregation import VariantScore, _withhold_evidence
+    ped = pedigree_from_rows(SIBS)
+    a, b = compound_variants()[:2]
+    single = VariantScore(a, -1.5)
+    _withhold_evidence(ped, [single], [VariantScore(a, 0.2, partner=b)])
+    # a pair with no evidence of its own doesn't hide the evidence against the variant alone
+    assert single.evidence == 'BS4_Strong'
+    _withhold_evidence(ped, [single], [VariantScore(a, 0.5, partner=b)])
+    assert single.evidence == '' and 'a + b' in single.evidence_withheld
+
+
 def test_pairs_left_out_when_their_locus_is_too_tangled(monkeypatch):
     from pednet import engine
     monkeypatch.setattr(engine, 'MAX_STATES', 500)
