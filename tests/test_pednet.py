@@ -66,21 +66,27 @@ def test_generated_pedigrees(mode):
                 assert g in weights['forward_genotypes'][pair]
 
 
+def mendelian_background(df, table):
+    '''For each background variant (not the linked one), whether every child's genotype could come from the child's parents'''
+    rows = df.set_index('IndividualID')
+    weights = PDG.inheritance_weights(0.5, 0.5)
+    results = []
+    for variant, genotypes in table.items():
+        if variant == 'chr1:100000_A>T':
+            continue
+        results.append(all(genotypes[person] in weights['forward_genotypes'][(genotypes[int(row['PaternalID'])], genotypes[int(row['MaternalID'])])]
+                           for person, row in rows.iterrows() if int(row['PaternalID'])))
+    return results
+
+
 def test_inherited_background_variants_are_mendelian():
     random.seed(2)
     df = PDG.pedigree_generator('F', 'AR', 3, (4, 4), (20, 20), (50, 50), (50, 50), True)
-    table = PDG.simulate_variant_table(df, (100, 100), (20, 20), (10, 40), inherited_background=True)
-    rows = df.set_index('IndividualID')
-    weights = PDG.inheritance_weights(0.5, 0.5)
-    shared = 0
-    for variant, genotypes in table.items():
-        for person, row in rows.iterrows():
-            father, mother = int(row['PaternalID']), int(row['MaternalID'])
-            if father:
-                assert genotypes[person] in weights['forward_genotypes'][(genotypes[father], genotypes[mother])]
-                shared += genotypes[person] > 0 and (genotypes[father] > 0 or genotypes[mother] > 0)
-    # relatives share background variants
-    assert shared > 0
+    inherited = mendelian_background(df, PDG.simulate_variant_table(df, (100, 100), (20, 20), (10, 40), inherited_background=True))
+    assert len(inherited) == 20 and all(inherited)
+    # drawn independently for each person, as by default, most background variants break Mendel's laws somewhere in the family
+    independent = mendelian_background(df, PDG.simulate_variant_table(df, (100, 100), (20, 20), (10, 40)))
+    assert len(independent) == 20 and sum(independent) < 10
 
 
 def test_variant_table_check_tries_again(monkeypatch):
@@ -108,12 +114,27 @@ def test_text_ids():
     assert set(G.edges) == {('a', 'c'), ('b', 'c')}
 
 
+def test_decimal_and_missing_parent_ids():
+    # a parent column with a missing value is read as decimals, so its zeros are 0.0
+    G = construct_pedigree_graph(pedigree([(1, 0.0, 0.0, 1, 2), (2, 0.0, 0.0, 2, 1), (3, 1.0, 2.0, 1, 2), (4, float('nan'), 0.0, 2, 1),
+                                           (5, 3.0, 4.0, 2, 1)]))
+    assert set(G.nodes) == {1, 2, 3, 4, 5}
+    assert set(G.edges) == {(1, 3), (2, 3), (3, 5), (4, 5)}
+
+
 def test_generations_of_people_who_married_in():
     # 4 married in with no parents in the pedigree, and 8 married in with their parents, 6 and 7, drawn too
     G = construct_pedigree_graph(pedigree([
         (1, 0, 0, 1, 2), (2, 0, 0, 2, 1), (3, 1, 2, 1, 2), (4, 0, 0, 2, 1), (5, 3, 4, 1, 2),
         (6, 0, 0, 1, 1), (7, 0, 0, 2, 1), (8, 6, 7, 2, 1), (10, 5, 8, 2, 2)]))
     assert generations(G) == {1: 0, 2: 0, 3: 1, 4: 1, 6: 1, 7: 1, 5: 2, 8: 2, 10: 3}
+
+
+def test_generations_when_people_of_two_generations_have_children():
+    # 4 has a child with his niece 6: whatever the order of the rows, each child is one generation below its lower parent
+    rows = [(1, 0, 0, 1, 1), (2, 0, 0, 2, 1), (3, 1, 2, 1, 1), (4, 1, 2, 1, 2), (5, 0, 0, 2, 1), (6, 3, 5, 2, 2), (7, 4, 6, 1, 1)]
+    for order in (rows, rows[::-1], rows[4:] + rows[:4]):
+        assert generations(construct_pedigree_graph(pedigree(order))) == {1: 0, 2: 0, 3: 1, 4: 1, 5: 1, 6: 2, 7: 3}
 
 
 def test_consanguinity():

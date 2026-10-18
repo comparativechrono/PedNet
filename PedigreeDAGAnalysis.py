@@ -36,9 +36,23 @@ def pedfile_readin(pedfile):
 #-------------------------
 def no_parent(parent_id):
     '''
-    A parent ID of 0 means that parent isn't in the pedigree. IDs read as text (when some IDs aren't numbers) give '0' rather than 0
+    Whether a parent ID means that the parent isn't in the pedigree: 0, however it was read (0, 0.0 or '0'), or a missing value.
+    IDs are read as text when some of them aren't numbers, and as decimals when a column has a missing value
     '''
-    return pd.isna(parent_id) or str(parent_id).strip() in ('0', '')
+    if parent_id is None:
+        return True
+    try:
+        if pd.isna(parent_id):
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(parent_id).strip()
+    if text == '':
+        return True
+    try:
+        return float(text) == 0
+    except ValueError:
+        return False
 
 def construct_pedigree_graph(df, rm_floaters= True):
     '''
@@ -134,29 +148,37 @@ def generations(G):
     counting from 0 for the oldest generation.
     Each child is one generation below its parents, so partners share a generation, and someone who married into the family is in their partner's
     generation, however many of their own ancestors are drawn. Where that can't hold throughout, as when people of different generations have
-    children together, a child is put one generation below its lower parent.
+    children together, each child is put one generation below its lower parent, and each person with no parents in the pedigree one generation
+    above their highest child. Either way, the generations don't depend on the order of the people.
     """
     lvl = {}
     order = list(nx.topological_sort(G))
     for component in nx.weakly_connected_components(G):
+        people = [n for n in order if n in component]
         #spreading out from one person to the whole family, a child one generation below a parent and a parent one above a child
-        start = next(n for n in order if n in component)
-        level = {start: 0}
-        queue = deque([start])
+        level = {people[0]: 0}
+        queue = deque([people[0]])
+        consistent = True
         while queue:
             n = queue.popleft()
             for neighbour, step in [(c, 1) for c in G.successors(n)] + [(p, -1) for p in G.predecessors(n)]:
                 if neighbour not in level:
                     level[neighbour] = level[n] + step
                     queue.append(neighbour)
+                elif level[neighbour] != level[n] + step:
+                    consistent = False
+        if not consistent:
+            level = {}
+            for n in people:
+                prnts = list(G.predecessors(n))
+                level[n] = max(level[p] for p in prnts) + 1 if prnts else 0
+            for n in people:
+                kids = list(G.successors(n))
+                if not list(G.predecessors(n)) and kids:
+                    level[n] = min(level[c] for c in kids) - 1
         oldest = min(level.values())
         for n, l in level.items():
             lvl[n] = l - oldest
-    #where the steps disagree, a child goes below both parents
-    for n in order:
-        prnts = list(G.predecessors(n))
-        if prnts:
-            lvl[n] = max(lvl[n], max(lvl[p] for p in prnts) + 1)
     return lvl
 
 def longest_path_length(G):

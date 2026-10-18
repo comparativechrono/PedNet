@@ -55,7 +55,7 @@ python PedNetPipeline.py
 
 ## Ranks and ties
 
-When the linked variant scores the same as an unlinked one, its rank is shared out fairly between them: a tie with one other variant for the top score gives a rank of 1.5, not 1. Before, the linked variant was put ahead of every variant it tied with, since it comes first in the variant table.
+When the linked variant scores the same as an unlinked one, the rank is shared between them: a tie with one other variant for the top score gives a rank of 1.5, the linked variant's expected rank if ties were broken at random. Before, the linked variant was put ahead of every variant it tied with, since it comes first in the variant table. So in the benchmarks, a hit at 1 (`Top1`) now means that the linked variant scored higher than every other variant: a tie for the top score counts as a miss. The inverse rank and DCG are worked out from the shared rank.
 
 ## Tests
 
