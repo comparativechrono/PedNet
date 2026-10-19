@@ -63,7 +63,7 @@ How well the probabilities are calibrated, over all the families above: the most
 
 ### Families unlike the training families
 
-The same, for families of two to four generations unlike those the classifiers were trained on, and outside the likelihood methods' default range of penetrances: a penetrance drawn between 0.3 and 0.6, a phenocopy rate of 0.01, a quarter of phenotypes unknown, two to six children to a couple, more of whom have families of their own, and no consanguinity. A real family differs from any simulation in ways like these, and this shows how each method copes. These families still come from the same generator as the training families, though: the condition always enters through the first couple, consanguinity has one pattern, and there are no half-siblings or people of unknown sex, so even these results probably flatter the classifiers. The rows for the likelihood told the penetrance give it what would be known about such a condition: penetrances of 0.3, 0.45 and 0.6 to average over, and the phenocopy rate.
+The same, for families of two to four generations unlike those the classifiers were trained on, and outside the likelihood methods' default range of penetrances: a penetrance drawn between 0.3 and 0.6, a phenocopy rate of 0.01, a quarter of phenotypes unknown, two to six children to a couple, more of whom have families of their own, and no consanguinity. A real family differs from any simulation in ways like these, and this shows how each method copes. These families still come from the same generator as the training families, though: the disease allele always enters through the first couple (and for a recessive condition, a second copy through someone who married in), consanguinity has one pattern, and there are no half-siblings or people of unknown sex, so even these results probably flatter the classifiers. The rows for the likelihood told the penetrance give it what would be known about such a condition: penetrances of 0.3, 0.45 and 0.6 to average over, and the phenocopy rate.
 
 | Families | Method | Right | Wrong | Uncertain | Right when certain | True mode most probable |
 |---|---|---|---|---|---|---|
@@ -137,4 +137,4 @@ Each family has the causal variant and 20 rare background variants carried by th
 | concordance, mode known | 0.22 | 2.32 | 0.59 |
 | no background pair identical | 0.85 | | |
 
-Took 79 seconds.
+Took 73 seconds.

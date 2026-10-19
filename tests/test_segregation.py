@@ -304,6 +304,34 @@ def test_impossible_genotypes_with_no_errors_allowed():
     assert scores['a + b'].log10_bf is None and 'error rate is 0' in scores['a + b'].notes
 
 
+def test_no_errors_allowed_and_no_chromosome_given():
+    # passed from father to son, a variant can't be on the X without an error: with an error rate of 0, only the X
+    # modes are left out, and it is scored on an autosome as it would be with errors allowed
+    ped = pedigree_from_rows(FAMILY)
+    calls = {'1': 1, '2': 0, '3': 1, '4': 0, '5': 0, '6': 1, '7': 0, '8': 1}
+    unknown = Variant('v', dict(calls))
+    exact = rank_variants(ped, [unknown], error_rate=0)[0]
+    allowed = rank_variants(ped, [Variant('v', dict(calls))])[0]
+    assert exact.impossible_modes == ['XLR', 'XLD'] and set(exact.log10_lr) == {'AD', 'AR'}
+    assert exact.evidence == 'PP1_Strong' and exact.log10_bf == pytest.approx(allowed.log10_bf, abs=0.05)
+    assert 'XLR and XLD are left out' in exact.notes
+    # over two families, a mode ruled out in one is ruled out for both
+    two = pedigree_from_rows([(f'b{pid}', f'b{f}' if f else 0, f'b{m}' if m else 0, s, p) for pid, f, m, s, p in FAMILY],
+                             'two')
+    both = dict(calls, **{f'b{k}': v for k, v in calls.items()})
+    combined = rank_variants_across({'one': ped, 'two': two}, [Variant('v', both)], error_rate=0)[0]
+    assert combined.log10_bf is not None and combined.evidence == 'PP1_Strong'
+    # in family two the genotypes fit the X as well (from mother to son, and from father to both daughters), but
+    # family one rules the X out for both
+    on_x_too = {'b1': 0, 'b2': 1, 'b3': 1, 'b4': 0, 'b5': 1, 'b6': 1, 'b7': 1, 'b8': 1}
+    mixed = rank_variants_across({'two': two, 'one': ped}, [Variant('v', dict(calls, **on_x_too))], error_rate=0)[0]
+    assert set(mixed.families['two'].log10_lr) == {'AD', 'AR', 'XLR', 'XLD'}
+    assert mixed.log10_bf is not None and np.isfinite(mixed.log10_bf)
+    alone = rank_variants_across({'two': two, 'one': ped}, [Variant('v', dict(calls, **on_x_too))], error_rate=0,
+                                 modes=('AD', 'AR'))[0]
+    assert mixed.log10_bf == pytest.approx(alone.log10_bf)
+
+
 def test_evidence_withheld_only_for_a_pair_with_evidence():
     from pednet.segregation import VariantScore, _withhold_evidence
     ped = pedigree_from_rows(SIBS)

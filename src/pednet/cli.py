@@ -333,8 +333,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                           'With several families in the PED file (and no --family), the families are taken to have '
                           'the same condition, with one mode of inheritance, and each candidate is ranked by its '
                           'evidence over the families in which an affected person carries it: the sum of their log10 '
-                          'Bayes factors when the mode is given (--modes AD, say), and otherwise less than the sum if '
-                          'the families point to different modes.')
+                          'Bayes factors when the mode is given (--modes AD, say), and otherwise more than the sum if '
+                          'the families agree on the mode, and less if they point to different modes.')
     _common(rank)
     rank.add_argument('variants', help='a VCF file (.vcf or .vcf.gz), or a table with a column per person')
     rank.add_argument('--frequency-key', default='AF', help='the INFO field with the allele frequency (default: AF)')
