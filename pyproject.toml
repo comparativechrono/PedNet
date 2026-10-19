@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PedNet"
-version = "2.0.0"
+version = "2.1.0"
 description = "Pedigrees as graphs: their structure, kinship and loops, the pattern of affected people, the mode of inheritance, and the co-segregation of candidate variants"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -20,7 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-dependencies = ["numpy>=1.21", "networkx>=3.2"]
+dependencies = ["numpy>=1.21", "networkx>=3.2", "pedigree-ga4gh>=1.0,<2"]
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
