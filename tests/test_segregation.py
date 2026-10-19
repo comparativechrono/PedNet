@@ -327,6 +327,7 @@ def test_no_errors_allowed_and_no_chromosome_given():
     mixed = rank_variants_across({'two': two, 'one': ped}, [Variant('v', dict(calls, **on_x_too))], error_rate=0)[0]
     assert set(mixed.families['two'].log10_lr) == {'AD', 'AR', 'XLR', 'XLD'}
     assert mixed.log10_bf is not None and np.isfinite(mixed.log10_bf)
+    assert 'XLR and XLD are left out for every family' in mixed.note and 'in one ' in mixed.note
     alone = rank_variants_across({'two': two, 'one': ped}, [Variant('v', dict(calls, **on_x_too))], error_rate=0,
                                  modes=('AD', 'AR'))[0]
     assert mixed.log10_bf == pytest.approx(alone.log10_bf)

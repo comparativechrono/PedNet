@@ -727,6 +727,12 @@ def rank_variants_across(pedigrees, variants: Iterable[Variant], probands: Optio
             c.note = (f'its genotypes in {", ".join(by_family)} can\'t have been passed down under any one mode '
                       'without a genotyping error, and the error rate is 0, so it isn\'t scored')
             continue
+        ruled_out = [m for m in log_priors if any(m in s.impossible_modes for s in by_family.values())]
+        if ruled_out:
+            where = [f for f, s in by_family.items() if s.impossible_modes]
+            c.note = (f'{" and ".join(ruled_out)} {"is" if len(ruled_out) == 1 else "are"} left out for every '
+                      f'family, since its genotypes in {", ".join(where)} can\'t have been passed down that way '
+                      'without a genotyping error, and the error rate is 0')
         with_modes = [log_priors[m] + sum(by_family[f].log_likelihood[m] if f in by_family else without[f][m]
                                           for f in pedigrees) for m in suited]
         suited_without = [log_priors[m] + sum(without[f][m] for f in pedigrees) for m in suited]
