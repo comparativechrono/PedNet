@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.1.0
+## 2.0.0
 
-The first release. PedNet becomes a package that analyses a pedigree as a directed acyclic graph, in three ways.
-The original modules, which it grew from, are kept in `legacy/` and aren't part of the package.
+The first release on PyPI. PedNet becomes a package that analyses a pedigree as a directed acyclic graph, in
+three ways. Version 1.0.0 was a GitHub release archiving the original code, before PedNet was a package; the original
+modules are kept in `legacy/` and aren't part of the package.
 
 The structure of the family, in `pednet.graph`:
 

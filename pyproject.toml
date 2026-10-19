@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PedNet"
-version = "0.1.0"
+version = "2.0.0"
 description = "Pedigrees as graphs: their structure, kinship and loops, the pattern of affected people, the mode of inheritance, and the co-segregation of candidate variants"
 readme = "README.md"
 requires-python = ">=3.9"

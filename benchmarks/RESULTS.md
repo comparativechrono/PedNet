@@ -19,7 +19,7 @@ families from the same simulator (benchmarks/train_classifiers.py, with another 
 families), which favours them here, so the benchmark also tests all three on families unlike those they were trained
 on.
 
-PedNet 0.1.0, with its defaults unless the table says otherwise. Simulated families: 200 for each mode; seed 1.
+PedNet 2.0.0, with its defaults unless the table says otherwise. Simulated families: 200 for each mode; seed 1.
 
 ## The mode of inheritance
 
@@ -137,4 +137,4 @@ Each family has the causal variant and 20 rare background variants carried by th
 | concordance, mode known | 0.22 | 2.32 | 0.59 |
 | no background pair identical | 0.85 | | |
 
-Took 73 seconds.
+Took 89 seconds.

@@ -5,7 +5,7 @@
 # Settings > Publishing; before the first release, your account's Publishing page, as a "pending publisher").
 #
 # To release: set the new version in pyproject.toml and in src/pednet/__init__.py, add it to CHANGELOG.md, merge, and
-# push a tag of the version, such as v0.1.0. Publishing a GitHub release with a new tag of that name does the same.
+# push a tag of the version, such as v2.0.0. Publishing a GitHub release with a new tag of that name does the same.
 # The workflow can also be run by hand from the Actions tab, choosing the tag to run it on.
 name: Release
 
