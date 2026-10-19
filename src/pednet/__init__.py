@@ -12,7 +12,7 @@ from .pedigree import Pedigree, PedigreeError, Person, pedigree_from_rows, read_
 from .segregation import (CombinedScore, Variant, VariantScore, evidence_strength, rank_variants,
                           rank_variants_across)
 
-__version__ = '0.1.0'
+__version__ = '2.0.0'
 
 __all__ = [
     'pedigree_graph', 'mating_graph', 'moral_graph', 'loops', 'kinship', 'kinship_matrix', 'inbreeding',
