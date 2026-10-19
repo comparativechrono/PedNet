@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.0
+
+PedNet reads GA4GH pedigrees as well as PED files: the GA4GH Pedigree, in which each person is a Phenopacket and the
+family is given by KIN relationships (as studio2ga4gh, PedGen and PedInterp write it), and the Phenopackets Family.
+
+- `read_pedigree` reads a file of either kind, and every `pednet` command takes one. `read_ga4gh` reads the GA4GH
+  files alone. They are read with pedigree-ga4gh, which PedNet now installs, so parents are found as the lab's other
+  tools find them. Older forms of these files are refused, with how to upgrade them.
+- A GA4GH Pedigree records who is affected through each person's conditions. With several, `--condition` (or
+  `condition`) chooses one; otherwise having any of them makes someone affected. People with no record of the
+  condition are taken as unaffected if the file marks no one as not having it, as drawings converted by
+  studio2ga4gh don't, and as of unknown phenotype if it marks anyone, as PedGen's and PedInterp's files do;
+  `--unrecorded` says which instead. `pednet check` says what was taken.
+
 ## 2.0.0
 
 The first release on PyPI. PedNet becomes a package that analyses a pedigree as a directed acyclic graph, in

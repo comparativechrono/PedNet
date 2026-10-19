@@ -12,7 +12,7 @@ The answers about inheritance are in the terms that variant classification uses:
 pip install PedNet
 ```
 
-It needs Python 3.9 or later, NumPy and networkx.
+It needs Python 3.9 or later, NumPy and networkx, and reads GA4GH pedigrees with [pedigree-ga4gh](https://github.com/comparativechrono/pedigree-ga4gh), which pip installs with it.
 
 ## A pedigree is a graph
 
@@ -31,7 +31,10 @@ pednet check family.ped                  # what PedNet makes of a PED file
 pednet graph family.ped                  # the structure of the family, from the graph
 pednet mode family.ped                   # the mode of inheritance
 pednet rank family.ped family.vcf.gz     # the candidate variants, the most likely cause first
+pednet mode family_ga4gh-pedigree.json --condition MONDO:0009061   # a GA4GH Pedigree, for one of its conditions
 ```
+
+Each command reads a PED file, or a GA4GH Pedigree or Phenopackets Family (see [What goes in](#what-goes-in)).
 
 ### The structure of the family
 
@@ -159,13 +162,17 @@ Family FAM2: uncertain
 
 Two affected children can't settle the mode, though they make a recessive condition likely. Of the candidates, a variant that both affected children have two copies of, and a pair in one gene that they both carry, one variant from each parent, explain the family almost equally well. var7a on its own has no evidence given, since it should be judged with its pair.
 
-`infer_mode` and `rank_variants` take the same options as the command (`modes`, `penetrance`, `phenocopy`, `proband` and more), and their docstrings describe them. `infer_shared_mode` and `rank_variants_across` work over several families. `pedigree_from_rows` makes a pedigree from rows or from a pandas DataFrame with the PED columns, as [PedGen](https://github.com/comparativechrono/pedigree-generator) and [PedInterp](https://github.com/comparativechrono/pedigree-interpreter) make them, and `Variant` holds a variant's genotypes if they come from somewhere else. `pednet.simulate` makes simulated families, with background variants passed down the pedigree, for testing.
+`infer_mode` and `rank_variants` take the same options as the command (`modes`, `penetrance`, `phenocopy`, `proband` and more), and their docstrings describe them. `infer_shared_mode` and `rank_variants_across` work over several families. `read_pedigree` reads a PED file or a GA4GH one, as the commands do, and `read_ga4gh` a GA4GH file alone, with the options `condition` and `unrecorded` that the commands have as `--condition` and `--unrecorded`. `pedigree_from_rows` makes a pedigree from rows or from a pandas DataFrame with the PED columns, as [PedGen](https://github.com/comparativechrono/pedigree-generator) and [PedInterp](https://github.com/comparativechrono/pedigree-interpreter) make them, and `Variant` holds a variant's genotypes if they come from somewhere else. `pednet.simulate` makes simulated families, with background variants passed down the pedigree, for testing.
 
 ## What goes in
 
 **A PED file**, one person per line in six columns separated by spaces or tabs: family, person, father, mother, sex (1 male, 2 female, 0 unknown) and phenotype (2 affected, 1 unaffected, 0 or -9 unknown). A father or mother of 0 isn't in the file. Lines starting with `#` are skipped. A parent who has no line of their own is added, with an unknown phenotype, and so is the missing parent of someone with only one in the file (one unknown partner for each known parent, so that children with the same known parent are taken as full siblings); a parent's sex is taken from their role. `pednet check` lists anything PedNet changed or found odd.
 
-**A VCF file** of the family's candidate variants, plain or gzipped. The genotypes come from the GT field, so the samples must be named as the people are in the PED file. Each alternate allele of a site is a candidate of its own. The allele frequency comes from the INFO field `AF`, or another (`--frequency-key AF_joint`, say, for gnomAD's), and the gene, which pairs variants up as compound heterozygotes, from the annotations of VEP (`CSQ`), SnpEff (`ANN`) or bcftools csq (`BCSQ`), or a field such as `GENE`, `Gene.refGene` (ANNOVAR) or `GENEINFO` (dbSNP); `--gene-key` names another. PedNet scores whatever it is given, so filter the VCF to the variants that could cause the condition first (rare, and protein-altering or otherwise plausible), or at least leave out common ones with `--max-frequency`. A whole exome's worth of variants takes well under a minute.
+**Or a GA4GH pedigree**, in JSON: a **GA4GH Pedigree**, in which each person is a Phenopacket and the family is given by KIN relationships, as [studio2ga4gh](https://github.com/comparativechrono/studio2ga4gh), [PedGen](https://github.com/comparativechrono/pedigree-generator) and [PedInterp](https://github.com/comparativechrono/pedigree-interpreter) write it, or a **Phenopackets Family**, whose pedigree is a PED file in JSON. A file whose text starts with `{` is read as one. They are read with pedigree-ga4gh, so parents are found as the lab's other tools find them: a sperm donor counts as a father, an ovum donor as a mother, and an adoptive parent as neither. Older forms of these files, from before the standard's form was settled, are refused, with how to upgrade them (`pedigree-ga4gh upgrade FILE`).
+
+A GA4GH Pedigree says who is affected only through each person's conditions, their diseases and phenotypic features. Someone with the condition is affected, and someone with it marked as excluded (looked for, and not found) is unaffected. If the file names several conditions, `--condition` chooses one, by its ontology ID or its label; otherwise having any of them makes someone affected, and `pednet check` says so. Everyone else has no record of the condition: they are taken as unaffected if no one in the file is marked as not having it, as in the files that studio2ga4gh writes from drawings, which record only the affected; and as of unknown phenotype if anyone is, as in the files that PedGen and PedInterp write, which record both. `--unrecorded unaffected` or `--unrecorded unknown` says which instead, and `pednet check` says what was taken. A Phenopackets Family's own affected status is used, unless a condition is chosen.
+
+**A VCF file** of the family's candidate variants, plain or gzipped. The genotypes come from the GT field, so the samples must be named as the people are in the pedigree file. Each alternate allele of a site is a candidate of its own. The allele frequency comes from the INFO field `AF`, or another (`--frequency-key AF_joint`, say, for gnomAD's), and the gene, which pairs variants up as compound heterozygotes, from the annotations of VEP (`CSQ`), SnpEff (`ANN`) or bcftools csq (`BCSQ`), or a field such as `GENE`, `Gene.refGene` (ANNOVAR) or `GENEINFO` (dbSNP); `--gene-key` names another. PedNet scores whatever it is given, so filter the VCF to the variants that could cause the condition first (rare, and protein-altering or otherwise plausible), or at least leave out common ones with `--max-frequency`. A whole exome's worth of variants takes well under a minute.
 
 **Or a table** of variants, separated by tabs (or commas, for a `.csv` file): a column `variant` naming each, optional columns `chrom`, `pos`, `ref`, `alt`, `af` and `gene`, and a column for each person with the number of copies of the variant (0, 1 or 2) or a call such as `0/1`. An empty cell means the person wasn't genotyped.
 
@@ -269,7 +276,7 @@ python benchmarks/benchmark.py --families 200 --seed 1
 
 ## Where the methods come from
 
-None of PedNet's methods is new on its own. What PedNet does is put them together on one graph of the pedigree, for the PED and VCF files that clinical and research genetics use.
+None of PedNet's methods is new on its own. What PedNet does is put them together on one graph of the pedigree, for the PED, GA4GH and VCF files that clinical and research genetics use.
 
 - **The structure of the family** is classical graph theory and population genetics: kinship by Wright's path coefficients (1922) and Malécot's coefficient (1948), loops as a cycle basis (Paton's algorithm, which networkx uses), the width by Dilworth's theorem (1950), and centrality as networkx works it out (betweenness after Freeman, 1977).
 - **The network metrics, the original classifier and the network score** are the original PedNet's, by Nick Taylor.
