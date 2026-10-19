@@ -2,17 +2,43 @@
 import csv
 import gzip
 import io
+from collections import Counter
 from typing import Dict, Iterable, List, Optional
 
 from .segregation import Variant
 
 
 def _open_text(path):
+    """A plain or gzipped text file, read as UTF-8 with or without the byte-order mark Excel writes"""
     with open(path, 'rb') as handle:
         magic = handle.read(2)
     if magic == b'\x1f\x8b':
-        return io.TextIOWrapper(gzip.open(path), encoding='utf-8')
-    return open(path, encoding='utf-8')
+        return io.TextIOWrapper(gzip.open(path), encoding='utf-8-sig')
+    return open(path, encoding='utf-8-sig')
+
+
+def _unique_ids(variants: List[Variant]) -> List[Variant]:
+    """
+    Makes every variant's ID its own. An ID shared by several variants, as when bcftools norm -m- splits a site with
+    two alternate alleles and keeps its rsID on both, has the variant's place added (rs9 1:100:A>T), or failing that
+    a number
+    """
+    counts = Counter(v.id for v in variants)
+    seen: Counter = Counter()
+    for v in variants:
+        if counts[v.id] > 1:
+            if v.chrom is not None and v.pos is not None:
+                v.id = f'{v.id} {v.chrom}:{v.pos}:{v.ref}>{v.alt}'
+            else:
+                seen[v.id] += 1
+                v.id = f'{v.id} ({seen[v.id]})'
+    if len({v.id for v in variants}) < len(variants):
+        seen = Counter()
+        for v in variants:
+            seen[v.id] += 1
+            if seen[v.id] > 1:
+                v.id = f'{v.id} ({seen[v.id]})'
+    return variants
 
 
 def _copies(call: str, allele: int = 1) -> Optional[int]:
@@ -29,14 +55,38 @@ def _copies(call: str, allele: int = 1) -> Optional[int]:
         return None
 
 
-def _table_genotype(value: str) -> Optional[int]:
-    """A genotype in a table: a count of alternate alleles (0, 1, 2) or a call such as 0/1"""
+_COUNTS = {'0': 0, '1': 1, '2': 2, '0.0': 0, '1.0': 1, '2.0': 2}
+
+
+def _table_genotype(value: str, where: str = '') -> Optional[int]:
+    """
+    A genotype in a table: a count of alternate alleles (0, 1 or 2, or 0.0, 1.0 or 2.0) or a call such as 0/1 or 1|1,
+    with '', '.', 'NA' and ./. for no call. Anything else is an error, named by where.
+    """
     value = str(value).strip()
     if value in ('', '.', 'NA', 'nan', './.', '.|.', '-'):
         return None
-    if value in ('0', '1', '2'):
-        return int(value)
-    return _copies(value)
+    if value in _COUNTS:
+        return _COUNTS[value]
+    alleles = value.replace('|', '/').split('/')
+    if len(alleles) == 2 and all(a.isdigit() for a in alleles):
+        return sum(a != '0' for a in alleles)
+    if len(alleles) == 2 and all(a == '.' or a.isdigit() for a in alleles):
+        return None
+    raise ValueError(f'{where}{" " if where else ""}has the genotype {value!r}, which isn\'t 0, 1 or 2 copies or a '
+                     'call such as 0/1')
+
+
+def _frequency(value: Optional[str], where: str) -> Optional[float]:
+    if value is None or value.strip().lower() in ('', '.', 'na', 'nan', '-'):
+        return None
+    try:
+        frequency = float(value)
+    except ValueError:
+        raise ValueError(f'{where} has the allele frequency {value!r}, which isn\'t a number') from None
+    if not 0 <= frequency <= 1:
+        raise ValueError(f'{where} has the allele frequency {value!r}, which isn\'t between 0 and 1')
+    return frequency
 
 
 # INFO fields that may name a variant's gene, in the order they are looked for: those of VEP, SnpEff and bcftools csq,
@@ -98,7 +148,7 @@ def read_vcf(path, samples: Optional[Iterable[str]] = None, frequency_key: str =
                 frequency = frequencies[a - 1] if len(frequencies) >= a else None
                 gene = _gene(items, alt, len(alt_list), gene_key, csq_fields)
                 variants.append(Variant(identifier, genotypes, chrom, int(pos), ref, alt, frequency, gene))
-    return variants
+    return _unique_ids(variants)
 
 
 def vcf_samples(path) -> List[str]:
@@ -188,10 +238,16 @@ def read_genotype_table(path, delimiter: Optional[str] = None) -> List[Variant]:
             return None
         for number, row in enumerate(reader, start=1):
             identifier = column(row, 'variant', 'id') or f'variant {number}'
+            where = f'Row {number} ({identifier})'
             pos = column(row, 'pos', 'position')
-            af = column(row, 'af', 'allele_frequency')
-            variants.append(Variant(identifier, {p.strip(): _table_genotype(row[p]) for p in people},
-                                    column(row, 'chrom', 'chr', 'chromosome'), int(pos) if pos else None,
-                                    column(row, 'ref'), column(row, 'alt'), float(af) if af else None,
+            try:
+                position = int(pos) if pos else None
+            except ValueError:
+                raise ValueError(f'{where} has the position {pos!r}, which isn\'t a whole number') from None
+            genotypes = {p.strip(): _table_genotype(row[p] if row[p] is not None else '', f'{where}, column {p},')
+                         for p in people}
+            variants.append(Variant(identifier, genotypes, column(row, 'chrom', 'chr', 'chromosome'), position,
+                                    column(row, 'ref'), column(row, 'alt'),
+                                    _frequency(column(row, 'af', 'allele_frequency'), where),
                                     column(row, 'gene', 'symbol')))
-    return variants
+    return _unique_ids(variants)

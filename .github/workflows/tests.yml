@@ -23,11 +23,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install
         run: python -m pip install ".[test]"
+      # -o pythonpath=legacy leaves src off the path, so that the tests run on the installed package
       - name: Test
-        run: python -m pytest
+        run: python -m pytest -o pythonpath=legacy
 
   legacy:
-    name: The original modules, and the benchmark
+    name: With the original modules, and the benchmark
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -35,8 +36,10 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install
-        run: python -m pip install pandas networkx matplotlib scikit-learn scipy ".[test]"
-      - name: Test the original modules
-        run: MPLBACKEND=Agg python -m pytest tests/test_legacy.py
-      - name: Run a short benchmark
-        run: MPLBACKEND=Agg python benchmarks/benchmark.py --families 5
+        run: python -m pip install pandas matplotlib scikit-learn scipy ".[test]"
+      - name: Test, with the original modules' tests and the comparisons with them
+        run: MPLBACKEND=Agg python -m pytest -o pythonpath=legacy
+      - name: Train the classifiers and run the benchmark, briefly
+        run: |
+          python benchmarks/train_classifiers.py --families 20 --out "$RUNNER_TEMP/trained.py"
+          python benchmarks/benchmark.py --families 5

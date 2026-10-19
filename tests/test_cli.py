@@ -119,3 +119,57 @@ def test_module_runs(files):
     result = subprocess.run([sys.executable, '-m', 'pednet', 'check', str(files / 'f.ped')], capture_output=True,
                             text=True, env=env)
     assert result.returncode == 0 and 'Family F1' in result.stdout
+
+
+def test_output_cut_off(files):
+    # piped into something that stops reading, as head does, the command stops without a complaint
+    source = str(Path(pednet.__file__).resolve().parents[1])
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([source, os.environ.get('PYTHONPATH', '')]))
+    process = subprocess.Popen([sys.executable, '-m', 'pednet', 'graph', str(files / 'f.ped')],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    process.stdout.close()
+    error = process.stderr.read().decode()
+    process.wait()
+    assert 'Broken pipe' not in error and 'Exception' not in error and process.returncode == 1
+
+
+def test_graph(files, capsys, tmp_path):
+    kin, graphml = tmp_path / 'kin.tsv', tmp_path / 'f.graphml'
+    assert main(['graph', str(files / 'f.ped'), '--kinship', str(kin), '--graphml', str(graphml)]) == 0
+    out = capsys.readouterr().out
+    assert 'Family F1: 8 people in 3 generations, 4 affected' in out and 'no loops' in out
+    assert '3 is the son of 1 (first degree, kinship 0.2500)' in out
+    assert 'network metrics' in out and 'male_to_male 1.000' in out
+    rows = kin.read_text().splitlines()
+    assert rows[0].split('\t')[1:] == [str(i) for i in range(1, 9)] and rows[1].split('\t')[1] == '0.5'
+    assert graphml.read_text().startswith('<?xml')
+    assert main(['graph', str(files / 'two.ped'), '--kinship', str(kin)]) == 1
+
+
+def test_graph_of_a_pedigree_too_tangled_for_likelihoods(files, capsys, monkeypatch):
+    # the graph measures don't need the likelihoods, so they are all given even when exact likelihoods aren't possible
+    from pednet import engine
+    monkeypatch.setattr(engine, 'MAX_STATES', 10)
+    assert main(['graph', str(files / 'f.ped')]) == 0
+    out = capsys.readouterr().out
+    assert 'too many loops for exact likelihoods' in out and 'pattern features' in out and 'most central' in out
+
+
+def test_ranking_several_families_with_no_errors_allowed(files, capsys):
+    assert main(['rank', str(files / 'two.ped'), str(files / 'two.vcf'), '--error-rate', '0']) == 0
+    assert 'Traceback' not in capsys.readouterr().err
+
+
+def test_mode_by_graph(files, capsys):
+    assert main(['mode', str(files / 'f.ped'), '--method', 'patterns']) == 0
+    assert 'from the pattern of affected people: autosomal dominant' in capsys.readouterr().out
+    assert main(['mode', str(files / 'f.ped'), '--method', 'metrics', '--tsv']) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith('family\tcall\tratio_aff_parent') and lines[1].startswith('F1\tAD')
+    assert main(['mode', str(files / 'two.ped'), '--method', 'patterns', '--together']) == 1
+    capsys.readouterr()
+    # options for the likelihood alone are pointed out, not silently ignored
+    assert main(['mode', str(files / 'f.ped'), '--method', 'patterns', '--penetrance', '0.5']) == 0
+    assert 'takes no account of --penetrance' in capsys.readouterr().err
+    assert main(['mode', str(files / 'f.ped'), '--method', 'metrics', '--proband', '3', '--threshold', '0.9']) == 0
+    assert 'metric classifier' in capsys.readouterr().err

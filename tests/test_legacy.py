@@ -2,15 +2,25 @@
 Tests of the original modules in legacy/, kept for comparison with the new methods. They need the original
 requirements (pip install -r legacy/requirements.txt), and are skipped without them.
 """
+import importlib
 import math
 import random
 
 import pytest
 
+
+def need(name):
+    """The module, or the test skipped if it can't be imported (not installed, or installed but broken)"""
+    try:
+        return importlib.import_module(name)
+    except ImportError as error:
+        pytest.skip(f'needs {name} ({error})', allow_module_level=True)
+
+
 for _name in ('networkx', 'pandas', 'matplotlib', 'sklearn', 'scipy'):
-    pytest.importorskip(_name)
+    need(_name)
 # legacy/ is on the path when the tests run from the repository (see pyproject.toml), not from a source distribution
-pytest.importorskip('PedigreeDataGeneration')
+need('PedigreeDataGeneration')
 
 import matplotlib  # noqa: E402
 

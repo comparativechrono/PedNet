@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "PedNet"
 version = "0.1.0"
-description = "The mode of inheritance of a family, and how well each candidate variant co-segregates with its condition, from exact pedigree likelihoods"
+description = "Pedigrees as graphs: their structure, kinship and loops, the pattern of affected people, the mode of inheritance, and the co-segregation of candidate variants"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Tim Hearn", email = "tjh70@cam.ac.uk" }, { name = "Nick Taylor" }]
-keywords = ["pedigree", "mode of inheritance", "co-segregation", "segregation analysis", "likelihood ratio",
-            "variant classification", "rare disease", "genomics"]
+keywords = ["pedigree", "directed acyclic graph", "network analysis", "graph theory", "Bayesian network", "kinship",
+            "mode of inheritance", "co-segregation", "variant classification", "rare disease", "genomics"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -20,7 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-dependencies = ["numpy>=1.21"]
+dependencies = ["numpy>=1.21", "networkx>=3.2"]
 
 [project.optional-dependencies]
 test = ["pytest>=7"]

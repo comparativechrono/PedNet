@@ -5,6 +5,8 @@ A PED file has one person per line, in six columns: family, person, father, moth
 A father or mother of 0 means that parent isn't in the file.
 """
 import io
+import numbers
+import re
 from collections import deque
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -13,16 +15,27 @@ MALE, FEMALE, UNKNOWN_SEX = 1, 2, 0
 AFFECTED, UNAFFECTED, UNKNOWN = 2, 1, 0
 
 _NO_PARENT = {'', '0', '-9', 'na', 'nan', 'none', '.', '0.0'}
-_SEXES = {'1': MALE, 'm': MALE, 'male': MALE, '2': FEMALE, 'f': FEMALE, 'female': FEMALE}
+_SEXES = {'1': MALE, '1.0': MALE, 'm': MALE, 'male': MALE, '2': FEMALE, '2.0': FEMALE, 'f': FEMALE,
+          'female': FEMALE}
 _PHENOTYPES = {'2': AFFECTED, '1': UNAFFECTED, '2.0': AFFECTED, '1.0': UNAFFECTED,
                'affected': AFFECTED, 'unaffected': UNAFFECTED}
+
+
+def _id(value) -> str:
+    """A person's ID as text. A whole number stored as a decimal, as pandas stores the IDs in a column with a blank
+    in it (1.0), is written as the whole number (1), so that it matches the same ID in a column of whole numbers."""
+    if isinstance(value, numbers.Real) and not isinstance(value, numbers.Integral):
+        number = float(value)
+        if number == number and number.is_integer():
+            return str(int(number))
+    return str(value).strip()
 
 
 def _parent(value) -> Optional[str]:
     """A parent's ID, or None when the parent isn't in the pedigree (0, a blank, or a missing value)"""
     if value is None:
         return None
-    text = str(value).strip()
+    text = _id(value)
     if text.lower() in _NO_PARENT:
         return None
     try:
@@ -99,11 +112,27 @@ class Pedigree:
 
     def _complete(self):
         """Add missing parents, give each parent the sex of their role, and check that no one is both a father and a mother"""
+        # a parent written as a decimal (1.0), as a file saved from a table with blanks in its parent columns can
+        # have them, is the person with the whole-number ID (1), if no one has the decimal ID itself
+        renamed = set()
+        for p in self.people:
+            for role in ('father', 'mother'):
+                parent = getattr(p, role)
+                if parent is None or parent in self.index:
+                    continue
+                whole = parent.split('.')[0] if re.fullmatch(r'-?\d+\.0+', parent) else None
+                if whole is not None and whole in self.index:
+                    setattr(p, role, whole)
+                    renamed.add((parent, whole))
+        for parent, whole in sorted(renamed):
+            self.notes.append(f'the parent {parent} is taken to be {whole}, the same number written without decimals')
         fathers = {p.father for p in self.people if p.father is not None}
         mothers = {p.mother for p in self.people if p.mother is not None}
         both = fathers & mothers
         if both:
             raise PedigreeError(f'Family {self.family}: {", ".join(sorted(both))} listed as both a father and a mother')
+        # the children of each parent whose other parent isn't in the file, who share one unknown other parent
+        partnerless: Dict[Tuple[str, str], List[Person]] = {}
         for p in list(self.people):
             for role, sex in (('father', MALE), ('mother', FEMALE)):
                 parent = getattr(p, role)
@@ -111,13 +140,21 @@ class Pedigree:
                     self._add(Person(parent, sex=sex, added=True))
                     self.notes.append(f'{parent}, the {role} of {p.id}, has no line of their own, so was added with an unknown phenotype')
             if (p.father is None) != (p.mother is None):
-                role, sex = ('father', MALE) if p.father is None else ('mother', FEMALE)
-                new_id = f'{p.id}~{role}'
-                while new_id in self.index:
-                    new_id += '~'
-                self._add(Person(new_id, sex=sex, added=True, placeholder=True))
-                setattr(p, role, new_id)
-                self.notes.append(f'{p.id} has only one parent in the file, so an unknown {role} was added')
+                missing = 'father' if p.father is None else 'mother'
+                partnerless.setdefault((p.mother if missing == 'father' else p.father, missing), []).append(p)
+        for (known, missing), children in partnerless.items():
+            new_id = f'{known}~partner'
+            while new_id in self.index:
+                new_id += '~'
+            self._add(Person(new_id, sex=MALE if missing == 'father' else FEMALE, added=True, placeholder=True))
+            for child in children:
+                setattr(child, missing, new_id)
+            names = [c.id for c in children]
+            who = names[0] if len(names) == 1 else ', '.join(names[:-1]) + ' and ' + names[-1]
+            known_role = 'mother' if missing == 'father' else 'father'
+            self.notes.append(f'{who} {"has" if len(names) == 1 else "have"} only a {known_role} ({known}) in the file, '
+                              f'so an unknown {missing} was added' +
+                              ('' if len(names) == 1 else ', the same one for all of them'))
         for p in self.people:
             if p.id in fathers and p.sex != MALE:
                 if p.sex == FEMALE:
@@ -261,6 +298,11 @@ class Pedigree:
                     queue.append(c)
         return 10 ** 6
 
+    def to_networkx(self, placeholders: bool = False):
+        """The pedigree as a networkx DAG, with an edge from each parent to each child (see graph.pedigree_graph)"""
+        from .graph import pedigree_graph
+        return pedigree_graph(self, placeholders)
+
     def problems(self) -> List[str]:
         """Things in the family worth checking, besides the notes made while reading it"""
         found = []
@@ -316,10 +358,10 @@ def pedigree_from_rows(rows, family: str = '') -> Pedigree:
             pid, father, mother = row['IndividualID'], row['PaternalID'], row['MaternalID']
             sex, phenotype = row['Sex'], row['Phenotype']
             if not family and 'FamilyID' in row:
-                family = str(row['FamilyID'])
+                family = _id(row['FamilyID'])
         else:
             pid, father, mother, sex, phenotype = row
-        people.append(Person(str(pid).strip(), _parent(father), _parent(mother), _sex(sex), _phenotype(phenotype)))
+        people.append(Person(_id(pid), _parent(father), _parent(mother), _sex(_id(sex)), _phenotype(_id(phenotype))))
     return Pedigree(people, family)
 
 

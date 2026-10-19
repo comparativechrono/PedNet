@@ -174,5 +174,7 @@ def pair_log_likelihoods(pedigree: Pedigree, net: Network, pairs: Sequence[Tuple
             phen = np.stack([phenotype_factor(model.with_(penetrance=f), kind, person.phenotype) for f in pens])
             unary.append((phen[:, None, :] * evidence[i][None, :, :]).reshape(F * V, -1))
         joint = net.log_likelihood(unary).reshape(F, V)
-        out[mode] = _logsumexp(joint + log_w[:, None], axis=0) - log_genotypes
+        with np.errstate(invalid='ignore'):
+            # NaN where the genotypes have no probability at all, which the caller reports
+            out[mode] = _logsumexp(joint + log_w[:, None], axis=0) - log_genotypes
     return out

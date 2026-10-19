@@ -71,3 +71,30 @@ def test_read_genotype_table(tmp_path):
 def test_unnamed_variants(tmp_path):
     variants = read_genotype_table(write(tmp_path, 't.tsv', 'A\tB\n1\t0\n'))
     assert variants[0].id == 'variant 1' and variants[0].genotypes == {'A': 1, 'B': 0}
+
+
+def test_shared_ids_are_made_unique(tmp_path):
+    # bcftools norm -m- splits a site with two alternate alleles and keeps its rsID on both
+    text = ('##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tA\n'
+            '1\t100\trs9\tA\tG\t.\t.\t.\tGT\t0/1\n1\t100\trs9\tA\tT\t.\t.\t.\tGT\t0/0\n')
+    variants = read_vcf(write(tmp_path, 'split.vcf', text))
+    assert [v.id for v in variants] == ['rs9 1:100:A>G', 'rs9 1:100:A>T']
+    table = read_genotype_table(write(tmp_path, 't.tsv', 'variant\tA\nv\t1\nv\t0\n'))
+    assert [v.id for v in table] == ['v (1)', 'v (2)']
+
+
+def test_bad_table_cells(tmp_path):
+    for cell in ('3', '-1', 'x', '0/1/1'):
+        with pytest.raises(ValueError, match='column A'):
+            read_genotype_table(write(tmp_path, 'bad.tsv', f'variant\tA\nv\t{cell}\n'))
+    good = read_genotype_table(write(tmp_path, 'ok.tsv', 'variant\taf\tA\tB\tC\nv\t.\t1.0\t./.\t0|1\n'))[0]
+    assert good.genotypes == {'A': 1, 'B': None, 'C': 1} and good.allele_frequency is None
+    with pytest.raises(ValueError, match='allele frequency'):
+        read_genotype_table(write(tmp_path, 'af.tsv', 'variant\taf\tA\nv\tlow\t1\n'))
+
+
+def test_a_byte_order_mark(tmp_path):
+    path = tmp_path / 'excel.csv'
+    path.write_bytes('﻿variant,A,B\nv1,1,0\n'.encode('utf-8'))
+    (v,) = read_genotype_table(str(path))
+    assert v.id == 'v1' and v.genotypes == {'A': 1, 'B': 0}

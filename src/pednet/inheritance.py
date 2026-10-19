@@ -200,6 +200,9 @@ def infer_mode(pedigree: Pedigree, modes: Sequence[str] = MODES, penetrance=DEFA
         probands = affected
     if not affected:
         notes.append('no one is affected, so the phenotypes say nothing about the mode of inheritance')
+    elif len(affected) == 1:
+        notes.append('only one person is affected: a new dominant mutation, which PedNet doesn\'t model, would '
+                     'explain that as well as a recessive condition does')
     x_needed = any(X_LINKED[m] for m in modes)
     unknown_sex = [p.id for p in pedigree.people if p.sex == 0 and not p.placeholder]
     if x_needed and unknown_sex:
@@ -212,10 +215,14 @@ def infer_mode(pedigree: Pedigree, modes: Sequence[str] = MODES, penetrance=DEFA
         logs = {m: 0.0 for m in modes}
     log_post = np.array([np.log(priors[m]) + logs[m] if priors[m] > 0 else -np.inf for m in modes])
     total = _logsumexp(log_post)
-    post = np.exp(log_post - total) if np.isfinite(total) else np.array([priors[m] for m in modes])
+    possible = bool(np.isfinite(total))
+    post = np.exp(log_post - total) if possible else np.array([priors[m] for m in modes])
+    if probands and not possible:
+        notes.append('none of the modes allowed can give these phenotypes with this penetrance and phenocopy rate, '
+                     'so the probabilities shown are the priors')
     evidence = [ModeEvidence(m, float(post[k]), float(logs[m] / LN10)) for k, m in enumerate(modes)]
     evidence.sort(key=lambda e: -e.posterior)
-    call = evidence[0].mode if probands and evidence[0].posterior >= threshold else 'uncertain'
+    call = evidence[0].mode if probands and possible and evidence[0].posterior >= threshold else 'uncertain'
     return InheritanceResult(pedigree.family, evidence, call, threshold, probands, notes)
 
 
@@ -244,8 +251,12 @@ def infer_shared_mode(pedigrees, modes: Sequence[str] = MODES, penetrance=DEFAUL
         probands.extend(result.probands)
     log_post = np.array([np.log(priors[m]) + totals[m] if priors[m] > 0 else -np.inf for m in modes])
     total = _logsumexp(log_post)
-    post = np.exp(log_post - total) if np.isfinite(total) else np.array([priors[m] for m in modes])
+    possible = bool(np.isfinite(total))
+    post = np.exp(log_post - total) if possible else np.array([priors[m] for m in modes])
+    if probands and not possible:
+        notes.append('none of the modes allowed can give these phenotypes with this penetrance and phenocopy rate, '
+                     'so the probabilities shown are the priors')
     evidence = [ModeEvidence(m, float(post[k]), float(totals[m] / LN10)) for k, m in enumerate(modes)]
     evidence.sort(key=lambda e: -e.posterior)
-    call = evidence[0].mode if probands and evidence[0].posterior >= threshold else 'uncertain'
+    call = evidence[0].mode if probands and possible and evidence[0].posterior >= threshold else 'uncertain'
     return InheritanceResult(', '.join(p.family for p in pedigrees), evidence, call, threshold, probands, notes)
